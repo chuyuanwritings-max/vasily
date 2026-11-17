@@ -102,7 +102,8 @@ function onTouch(type, id, sx, sy) {
       const res = G.duel.triggerUp();
       if (res) {
         platform.vibrate(true);
-        if (!res.hit) G.missFlash = 0.8;
+        G.lastShot = res;
+        if (!res.hit) G.missFlash = 1.0;
       }
     }
   }
@@ -165,6 +166,35 @@ function drawScope(opt) {
     enemyDrop: opt.enemyDrop || 0,
   });
 
+  // 每一枪的弹孔：打在哪儿都看得见
+  const cam = opt.cam || d.cam;
+  d.impacts.forEach((imp) => {
+    if (imp.kind === 'hit') return;
+    const ix = scopeC.x + imp.x - cam.x;
+    const iy = scopeC.y + imp.y - cam.y;
+    const age = d.t - imp.t;
+    if (age < 0.5) {
+      ctx.strokeStyle = 'rgba(240,225,200,' + (1 - age * 2).toFixed(2) + ')';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(ix, iy, 4 + age * 30, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#120c1c';
+    ctx.beginPath();
+    ctx.arc(ix, iy, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#120c1c';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let k = 0; k < 4; k++) {
+      const a = k * 1.7 + 0.4;
+      ctx.moveTo(ix + Math.cos(a) * 3, iy + Math.sin(a) * 3);
+      ctx.lineTo(ix + Math.cos(a) * 7, iy + Math.sin(a) * 7);
+    }
+    ctx.stroke();
+  });
+
   // 打空：枪口火光照亮镜头下沿
   if (G.missFlash > 0) {
     ctx.fillStyle = 'rgba(255,220,120,' + (G.missFlash * 0.5).toFixed(2) + ')';
@@ -177,6 +207,16 @@ function drawScope(opt) {
   vg.addColorStop(1, 'rgba(10,5,20,0.55)');
   ctx.fillStyle = vg;
   ctx.fillRect(scopeC.x - D / 2, scopeC.y - D / 2, D, D);
+
+  // 他正在瞄你：镜子边缘一圈红光一闪一闪
+  if (d.drawLeft >= 0 && d.state === 'play') {
+    const a = 0.3 + 0.2 * Math.sin(d.t * 20);
+    const rg = ctx.createRadialGradient(scopeC.x, scopeC.y, D * 0.4, scopeC.x, scopeC.y, D / 2);
+    rg.addColorStop(0, 'rgba(255,0,40,0)');
+    rg.addColorStop(1, 'rgba(255,0,40,' + a.toFixed(2) + ')');
+    ctx.fillStyle = rg;
+    ctx.fillRect(scopeC.x - D / 2, scopeC.y - D / 2, D, D);
+  }
 
   if (!opt.noCross) drawCrosshair(ctx, scopeC.x + d.sway.x, scopeC.y + d.sway.y, d.steadiness());
 
@@ -285,7 +325,7 @@ function drawHud() {
   ctx.moveTo(mx, my);
   ctx.arc(mx, my, 15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * d.progress);
   ctx.closePath();
-  const danger = d.progress >= config.glintAt;
+  const danger = d.progress >= config.glintAt || d.locked;
   ctx.fillStyle = danger && Math.sin(G.modeT * 12) > 0 ? '#ff4d5e' : '#c2263a';
   ctx.fill();
   ctx.lineWidth = 3;
@@ -297,6 +337,7 @@ function drawHud() {
   ctx.beginPath();
   ctx.arc(mx - 5, my - 5, 3, 0, Math.PI * 2);
   ctx.fill();
+  if (d.locked) comicText(ctx, d.drawLeft >= 0 ? '他要开枪！' : '他找到你了', mx, scopeC.y - D / 2 + 34, d.drawLeft >= 0 ? 24 : 16, '#ff4d5e');
 
   // 左下：眨眼按钮，外圈是眼睛酸度
   ctx.beginPath();
@@ -319,7 +360,7 @@ function drawHud() {
   const st = d.steadiness();
   ctx.beginPath();
   ctx.arc(trigBtn.x, trigBtn.y, trigBtn.r, 0, Math.PI * 2);
-  ctx.fillStyle = st === 'steady' ? '#c2263a' : st === 'tremble' ? '#d9730d' : st === 'settling' ? '#7a2d45' : '#3a3150';
+  ctx.fillStyle = st === 'steady' ? '#c2263a' : st === 'tremble' ? '#d9730d' : st === 'settling' ? '#7a2d45' : st === 'recover' ? '#26203a' : '#3a3150';
   ctx.fill();
   ctx.lineWidth = 3;
   ctx.strokeStyle = INK;
@@ -342,7 +383,11 @@ function drawHud() {
     else if (d.shots === 0 && !d.holding) pulse(ctx, trigBtn);
   }
 
-  if (G.missFlash > 0) comicText(ctx, '暴露！', scopeC.x, scopeC.y + D / 2 - 30, 26, '#ff4d5e');
+  if (G.missFlash > 0 && G.lastShot) {
+    const words = { covered: '他缩着！', close: '差一点！', miss: '偏了！' };
+    comicText(ctx, words[G.lastShot.kind] || '偏了！', scopeC.x, scopeC.y + D / 2 - 44, 28, G.lastShot.kind === 'close' ? '#ffd23f' : '#ff4d5e');
+    if (!d.locked) comicText(ctx, '位置暴露', scopeC.x, scopeC.y + D / 2 - 16, 15, '#f4f1de');
+  }
 }
 
 function drawCrossIcon(ctx, x, y, s) {
@@ -439,7 +484,9 @@ function drawHit() {
   const t = G.modeT;
   const aimX = scopeC.x + (d.hitAt.x - d.cam.x);
   const aimY = scopeC.y + (d.hitAt.y - d.cam.y);
-  drawScope({ enemyDrop: t > 0.45 ? easeOut(clamp((t - 0.45) / 0.5, 0, 1)) * 14 : 0, noCross: t > 0.45 });
+  drawScope({ enemyDrop: t > 0.45 ? easeOut(clamp((t - 0.45) / 0.5, 0, 1)) * 14 : 0, noCross: true });
+  // 慢镜头回放：松手那一刻准星停在哪
+  if (t < 0.9) drawCrosshair(ctx, aimX, aimY, 'steady');
   if (t < 0.45) {
     // 子弹慢镜头
     const k = t / 0.45;
@@ -455,6 +502,7 @@ function drawHit() {
     const k = easeOut(clamp((t - 0.45) / 0.2, 0, 1));
     starburst(ctx, aimX, aimY, 70 * k, 42 * k, 12, '#ff4d5e');
     comicText(ctx, '嘣！', aimX, aimY, 44 * k);
+    comicText(ctx, '爆头', aimX, aimY + 52, 18 * k, '#f4f1de');
   }
 }
 
@@ -568,7 +616,10 @@ function render() {
   if (m === 'play' || m === 'hit' || m === 'intro' || m === 'story') drawHud();
 
   if (m === 'story') comicPanel('第 ' + G.levelNo + ' 场', '废墟之城 · 三个狙击手');
-  else if (m === 'intro') comicPanel('对手 ' + (G.duelIndex + 1) + ' / ' + config.duelsPerLevel, '眨眼找他，按住屏息，松手开枪');
+  else if (m === 'intro') {
+    const dc = G.duel.dcfg;
+    comicPanel('对手 ' + (G.duelIndex + 1) + ' / ' + config.duelsPerLevel, dc.name + ' · ' + dc.sub);
+  }
   else if (m === 'dead') {
     panel('你出局了');
     button('rescue', '▶ 叫队友拉你', L.W / 2 - 110, L.H * 0.52, 220, 58, callTeammate, true);

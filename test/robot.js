@@ -47,32 +47,42 @@ const fs = require('fs');
   await page.waitForTimeout(7400);
   check((await g(() => __vasily.G.duel.blinks)) > b0, '眼睛酸满了会强制眨眼');
 
-  // 打空：位置暴露、要装填
+  // 他缩着时瞄准他的头开枪：打不中，提示「他缩着」，留弹孔
+  await g(() => { __vasily.G.duel.progress = 0; });
+  await page.waitForFunction(() => __vasily.G.duel.enemy.mode === 'hide' && __vasily.G.duel.enemy.timer > 1.2);
   const p0 = await g(() => __vasily.G.duel.progress);
-  await g(() => { const d = __vasily.G.duel; const h = __vasily.scene.enemyHead(d.sc); d.cam.x = h.x > 400 ? h.x - 150 : h.x + 150; });
-  await page.mouse.move(...at(btn.trig)); await page.mouse.down(); await page.waitForTimeout(500); await page.mouse.up();
-  await page.waitForTimeout(100);
-  const after = await g(() => ({ p: __vasily.G.duel.progress, r: __vasily.G.duel.reloadSec, m: __vasily.G.mode }));
-  check(after.m === 'play' && after.p > p0 + 0.25 && after.r > 0, '打空一枪：对面进度大涨、要装填');
-  await snap('4_打空暴露');
-  await page.waitForTimeout(1500);
+  await page.mouse.move(...at(btn.trig)); await page.mouse.down(); await page.waitForTimeout(950);
+  await g(() => { const d = __vasily.G.duel; const h = __vasily.scene.enemyHead(d.sc); d.cam.x = h.x - d.sway.x; d.cam.y = h.y - d.sway.y; });
+  await page.mouse.up(); await page.waitForTimeout(80);
+  const cov = await g(() => { const d = __vasily.G.duel; return { kind: d.impacts.at(-1).kind, n: d.impacts.length, p: d.progress, m: __vasily.G.mode }; });
+  check(cov.m === 'play' && cov.kind === 'covered' && cov.n === 1, '他缩着时打头：打不中，提示「他缩着」，留弹孔');
+  check(cov.p > p0 + 0.25, '打空一枪：位置暴露，对面进度大涨');
+  await snap('4_他缩着');
 
-  // 按住屏息，稳住后对准头松手 → 命中。连赢三次
+  // 不屏息时晃动比判定圈大得多
+  const amp = await g(() => ({ a: __vasily.config.breath.amp, r: __vasily.G.duel.hitRadius }));
+  check(amp.a > amp.r * 2.5, '不屏息时准星晃动（' + amp.a + '）远大于判定圈（' + amp.r + '）：必须屏息');
+
+  // 等他要探头时提前按住，稳住后松手 → 命中。连赢三个对手（耐心型、焦躁型、狡猾型）
   async function winDuel(n) {
+    await g(() => { __vasily.G.duel.progress = 0; });
+    await page.waitForTimeout(1300);
+    await page.waitForFunction(() => { const e = __vasily.G.duel.enemy; return e.mode === 'rise' && !e.fake; }, null, { timeout: 15000, polling: 16 });
     await page.mouse.move(...at(btn.trig)); await page.mouse.down();
-    await page.waitForTimeout(1200);
-    const st = await g(() => __vasily.G.duel.steadiness());
-    if (n === 1) { check(st === 'steady', '按住 1.2 秒后准星稳住'); await snap('5_屏息稳住'); }
+    await page.waitForTimeout(920);
+    const st = await g(() => ({ s: __vasily.G.duel.steadiness(), e: __vasily.G.duel.exposed() }));
+    check(st.s === 'steady' && st.e, '对手 ' + n + '：提前按住，他探头时准星正好最稳');
+    if (n === 1) await snap('5_他探头_你最稳');
     await g(() => { const d = __vasily.G.duel; const h = __vasily.scene.enemyHead(d.sc); d.cam.x = h.x - d.sway.x; d.cam.y = h.y - d.sway.y; });
     await page.mouse.up();
     await page.waitForTimeout(80);
-    check((await g(() => __vasily.G.mode)) === 'hit', '第 ' + n + ' 次对狙：松手命中');
-    if (n === 1) { await page.waitForTimeout(600); await snap('6_嘣'); }
+    check((await g(() => __vasily.G.mode)) === 'hit', '对手 ' + n + '：松手爆头');
+    if (n === 1) { await page.waitForTimeout(250); await snap('6a_回放准星'); await page.waitForTimeout(400); await snap('6b_嘣'); }
     await page.waitForTimeout(1800);
-    if (n < 3) { check((await g(() => __vasily.G.mode)) === 'intro', '自动进下一个对手'); await page.waitForTimeout(1200); }
+    if (n < 3) { const mm = await g(() => ({ m: __vasily.G.mode, i: __vasily.G.duelIndex })); check(mm.i === n && (mm.m === 'intro' || mm.m === 'play'), '自动进下一个对手'); if (n === 1 && mm.m === 'intro') await snap('6c_对手性格'); await page.waitForFunction(() => __vasily.G.mode === 'play'); }
   }
   for (let n = 1; n <= 3; n++) await winDuel(n);
-  check((await g(() => __vasily.G.mode)) === 'win', '连赢三次就过关');
+  check((await g(() => __vasily.G.mode)) === 'win', '连赢三个就过关');
   await snap('7_过关');
 
   // 下一关：被打死 → 叫队友 → 广告占位 → 拉起来 → 再死就失败
@@ -82,7 +92,12 @@ const fs = require('fs');
   await g(() => __vasily.setMode('play'));
   await g(() => { __vasily.G.duel.progress = 0.999; });
   await page.waitForTimeout(200);
-  check((await g(() => __vasily.G.mode)) === 'dead', '对面先找到你：出局');
+  check((await g(() => __vasily.G.duel.locked && __vasily.G.mode === 'play')), '对面找到你后不会马上死：等他下一次探头');
+  await page.waitForFunction(() => __vasily.G.duel.drawLeft >= 0, null, { timeout: 15000 });
+  check(await g(() => __vasily.G.duel.glint()), '他探头要开枪：镜片一直亮');
+  await snap('8a_他要开枪');
+  await page.waitForFunction(() => __vasily.G.mode === 'dead', null, { timeout: 3000 });
+  check(true, '没抢在他前面开枪：出局');
   await snap('8_出局');
   const rb = await g(() => __vasily.G.buttons.find((b) => b.id === 'rescue'));
   await page.mouse.click((rb.x + rb.w / 2) * S, (rb.y + rb.h / 2) * S);
@@ -94,8 +109,8 @@ const fs = require('fs');
   const st2 = await g(() => ({ m: __vasily.G.mode, r: __vasily.G.rescuesLeft, a: __vasily.G.attempt, i: __vasily.G.duelIndex }));
   check(st2.m === 'play' && st2.r === 0 && st2.a === 1 && st2.i === 0, '拉起来后重打这一次，每关只能拉一次');
   await g(() => { __vasily.G.duel.progress = 0.999; });
-  await page.waitForTimeout(200);
-  check((await g(() => __vasily.G.mode)) === 'fail', '用过队友再死：这关失败');
+  await page.waitForFunction(() => __vasily.G.mode === 'fail', null, { timeout: 15000 });
+  check(true, '用过队友再死：这关失败');
   await snap('10_差一点');
 
   // 公平：几百个随机局，每个藏身点都能挪到镜子正中
@@ -105,6 +120,7 @@ const fs = require('fs');
     for (let s = 1; s <= 300; s++) {
       const sc = scene.build(s * 7, config.duels[2], D);
       if (!sc.spots.length) empty++;
+      sc.enemy.lift = 1; // 探头时的位置才是要瞄的地方
       const h = scene.enemyHead(sc);
       if (h.x < D / 2 - 6 || h.x > sc.w - D / 2 + 6 || h.y < D / 2 || h.y > sc.h - D / 2) bad++;
     }

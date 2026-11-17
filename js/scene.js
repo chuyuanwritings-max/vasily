@@ -114,15 +114,18 @@ function build(seed, duelCfg, D) {
       win: spot,
       pose: r() < 0.5 ? 0 : 1,
       shift: duelCfg.poseShift,
+      lift: 0, // 0 = 缩在窗台下，1 = 探出头
       color: mix(WIN_DARK, '#7a6a88', duelCfg.contrast * 3),
     },
   };
 }
 
+// 头的位置：探头时在窗口上部，缩着时降到窗台下（被窗框挡住）
+const DUCK = 15;
 function enemyHead(sc) {
   const e = sc.enemy;
   const dx = e.pose ? e.shift : -e.shift;
-  return { x: e.win.x + e.win.w / 2 + dx, y: e.win.y + 8 };
+  return { x: e.win.x + e.win.w / 2 + dx, y: e.win.y + 8 + (1 - e.lift) * DUCK };
 }
 
 function toggle(d) {
@@ -247,7 +250,8 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
     ctx.strokeStyle = e.color;
     ctx.lineWidth = 1.6;
     ctx.beginPath();
-    ctx.moveTo(ox + head.x + 2, oy + head.y + 7);
+    const sy = e.win.y + 8 + DUCK * 0.6;
+    ctx.moveTo(ox + head.x + 2, oy + sy + 7);
     ctx.lineTo(ox + head.x - 4 - (e.pose ? 7 : 4), oy + e.win.y + e.win.h + 2);
     ctx.stroke();
   }
