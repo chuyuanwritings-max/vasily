@@ -1,0 +1,16 @@
+{
+  "description": "《瓦西里》原型。微信开发者工具里「导入项目」选这个文件夹；appid 换成你自己的小游戏 AppID。",
+  "compileType": "game",
+  "appid": "touristappid",
+  "projectname": "vasily",
+  "setting": { "es6": true, "minified": true, "urlCheck": true },
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "tools" },
+      { "type": "folder", "value": "test" },
+      { "type": "file", "value": "preview.html" },
+      { "type": "file", "value": "index.html" },
+      { "type": "file", "value": "README.md" }
+    ]
+  }
+}
