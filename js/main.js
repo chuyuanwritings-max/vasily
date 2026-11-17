@@ -1,10 +1,19 @@
-// 《瓦西里》原型主程序：一关三次对狙、按钮、动画、女队友拉人。
+// 《瓦西里》原型主程序：开场 → 三场比赛（每场三个对手）→ 网吧揭晓 → 战队经营。
 // 所有画面都画在一张 canvas 上（微信小游戏没有 HTML 按钮）。
+//
+// 流程（G.mode）：
+//   title 开场 → story 第几场 → intro 对手登场 → play 对狙 → hit 爆头
+//     → move 换点位（下一个对手）…… 三个打完 → clear 这场拿下 → pick 三选一卡 → 下一场
+//     → 三场打完 → reveal 网吧揭晓（第一次）/ champ 冠军（之后）→ team 战队
+//   被打死：dead → ad 广告 → rescue 女队友拉起来 → play；拉人次数用完 → fail
 const platform = require('./platform.js');
 const config = require('./config.js');
 const scene = require('./scene.js');
+const themes = require('./themes.js');
+const team = require('./team.js');
+const cut = require('./cutscene.js');
 const { createDuel } = require('./duel.js');
-const { clamp, easeOut, roundRect, comicText, starburst } = require('./util.js');
+const { clamp, lerp, easeOut, roundRect, comicText, starburst, rng } = require('./util.js');
 
 const INK = '#1b1530';
 const DESIGN_W = 375;
@@ -18,19 +27,27 @@ const scopeC = { x: L.W / 2, y: 70 + D / 2 };
 const btnY = Math.min(L.H - 70, scopeC.y + D / 2 + (L.H - scopeC.y - D / 2) / 2);
 const eyeBtn = { x: L.W * 0.24, y: btnY, r: 38 };
 const trigBtn = { x: L.W * 0.73, y: btnY, r: 50 };
+const MATCHES = config.matches.length;
 
 const G = {
-  mode: 'story',
+  mode: 'title',
   modeT: 0,
-  levelNo: 1,
+  t: 0,
+  matchNo: 1, // 第几场（1~3），也是难度
   duelIndex: 0,
   attempt: 0,
   duel: null,
   results: [],
+  cards: [], // 这一次网吧赛拿到的临场卡
+  offer: [], // 选卡页上的三张
+  mods: null,
   rescuesLeft: config.rescuesPerLevel,
+  earned: 0, // 这一次网吧赛拿了多少奖金
   buttons: [],
   missFlash: 0,
+  toast: null,
   seedBase: Math.floor(Math.random() * 100000),
+  title: null, // 开场背景
 };
 
 function setMode(m) {
@@ -38,30 +55,64 @@ function setMode(m) {
   G.modeT = 0;
 }
 
+function toast(text) {
+  G.toast = { text, t: 0 };
+}
+
+function match() {
+  return config.matches[G.matchNo - 1];
+}
+
+function themeId(duelIndex) {
+  const ids = match().themes;
+  return ids[Math.min(duelIndex, ids.length - 1)];
+}
+
 function startDuel() {
   G.duel = createDuel({
-    seed: G.seedBase + G.levelNo * 1009 + G.duelIndex * 37 + G.attempt * 7919,
-    levelNo: G.levelNo,
+    seed: G.seedBase + G.matchNo * 1009 + G.duelIndex * 37 + G.attempt * 7919,
+    levelNo: G.matchNo,
     duelIndex: G.duelIndex,
     config,
     scopeD: D,
+    theme: themeId(G.duelIndex),
+    mods: G.mods,
   });
 }
 
-function startLevel() {
+// 一场比赛：三个对手。打输了重打这一场，手里的卡留着。
+function startMatch() {
   G.seedBase = Math.floor(Math.random() * 100000); // 以后好友挑战改成固定 seed
   G.duelIndex = 0;
   G.attempt = 0;
   G.results = [];
-  G.rescuesLeft = config.rescuesPerLevel;
+  G.mods = team.mods(G.cards);
+  G.rescuesLeft = config.rescuesPerLevel + G.mods.rescueAdd;
   startDuel();
   setMode(config.storyEnabled ? 'story' : 'intro');
+}
+
+// 一次网吧赛：三场。
+function startRun() {
+  G.matchNo = 1;
+  G.cards = [];
+  G.earned = 0;
+  startMatch();
+}
+
+function goTitle() {
+  const ids = themes.ORDER;
+  const id = ids[Math.floor(Math.random() * ids.length)];
+  G.title = { sc: scene.build(Math.floor(Math.random() * 99999), config.duels[0], D, id) };
+  setMode('title');
 }
 
 // —— 输入 ——
 function inCircle(b, x, y) {
   return Math.hypot(x - b.x, y - b.y) <= b.r + 8;
 }
+
+const TAP_TO_SKIP = { story: 0.3, intro: 0.3, clear: 1.0, reveal: 1.0, move: 0.6 };
 
 function onTouch(type, id, sx, sy) {
   const x = sx / scale;
@@ -73,8 +124,9 @@ function onTouch(type, id, sx, sy) {
       hitBtn.fn();
       return;
     }
-    if (G.mode === 'story' || G.mode === 'intro') {
-      if (G.modeT > 0.3) setMode(G.mode === 'story' ? 'intro' : 'play');
+    const skip = TAP_TO_SKIP[G.mode];
+    if (skip !== undefined) {
+      if (G.modeT > skip) skipAhead();
       touches[id] = { role: 'ui' };
       return;
     }
@@ -109,36 +161,83 @@ function onTouch(type, id, sx, sy) {
   }
 }
 
+// 点一下跳过过场
+function skipAhead() {
+  const m = G.mode;
+  if (m === 'story') setMode('intro');
+  else if (m === 'intro') setMode('play');
+  else if (m === 'move') afterMove();
+  else if (m === 'clear') afterClear();
+  else if (m === 'reveal' && G.modeT < cut.REVEAL_SEC - 1.2) G.modeT = cut.REVEAL_SEC - 1.2;
+}
+
 // —— 规则推进 ——
+function afterHit() {
+  G.results.push(G.duel.result());
+  G.earned += team.earn('perKill');
+  G.attempt = 0;
+  if (G.duelIndex + 1 < config.duelsPerLevel) {
+    G.duelIndex += 1;
+    startDuel(); // 下一个点位先建好，换位置动画用它的天色
+    setMode('move');
+  } else {
+    G.earned += team.earn('perMatch');
+    setMode('clear');
+  }
+}
+
+function afterMove() {
+  setMode('intro');
+}
+
+function afterClear() {
+  if (G.matchNo < MATCHES) {
+    G.offer = team.drawCards(G.cards, rng(G.seedBase + 3));
+    setMode('pick');
+  } else {
+    G.earned += team.earn('perCup');
+    if (!team.state().revealed) {
+      team.reveal();
+      setMode('reveal');
+    } else setMode('champ');
+  }
+}
+
+function pickCard(id) {
+  G.cards.push(id);
+  G.matchNo += 1;
+  startMatch();
+}
+
 function update(dt) {
+  G.t += dt;
   G.modeT += dt;
   G.missFlash = Math.max(0, G.missFlash - dt);
+  if (G.toast) {
+    G.toast.t += dt;
+    if (G.toast.t > 2.2) G.toast = null;
+  }
   const d = G.duel;
-  if (G.mode === 'story' && G.modeT > 1.6) setMode('intro');
-  else if (G.mode === 'intro' && G.modeT > 1.1) setMode('play');
-  else if (G.mode === 'play') {
+  const m = G.mode;
+  if (m === 'story' && G.modeT > 1.8) setMode('intro');
+  else if (m === 'intro' && G.modeT > 1.4) setMode('play');
+  else if (m === 'play') {
     d.update(dt);
     if (d.state === 'hit') setMode('hit');
     else if (d.state === 'dead') {
       platform.vibrate(true);
       setMode(G.rescuesLeft > 0 ? 'dead' : 'fail');
     }
-  } else if (G.mode === 'hit') {
-    if (G.modeT > 1.6) {
-      G.results.push(d.result());
-      G.duelIndex += 1;
-      G.attempt = 0;
-      if (G.duelIndex >= config.duelsPerLevel) setMode('win');
-      else {
-        startDuel();
-        setMode('intro');
-      }
-    }
-  } else if (G.mode === 'ad' && G.modeT > config.fakeAdSec) setMode('rescue');
-  else if (G.mode === 'rescue' && G.modeT > 1.9) {
+  } else if (m === 'hit') {
+    d.update(dt);
+    if (G.modeT > 1.6) afterHit();
+  } else if (m === 'move' && G.modeT > cut.RELOCATE_SEC) afterMove();
+  else if (m === 'clear' && G.modeT > cut.CLEAR_SEC) afterClear();
+  else if (m === 'ad' && G.modeT > config.fakeAdSec) setMode('rescue');
+  else if (m === 'rescue' && G.modeT > cut.RESCUE_SEC) {
     G.rescuesLeft -= 1;
     G.attempt += 1;
-    startDuel(); // 拉起来以后重打这一次，对面换个地方藏
+    startDuel(); // 拉起来以后重打这一个，对面换个地方藏
     setMode('play');
   }
 }
@@ -153,7 +252,7 @@ function callTeammate() {
   else setMode('adWait');
 }
 
-// —— 画 ——
+// —— 画：狙击镜 ——
 function drawScope(opt) {
   const d = G.duel;
   const ctx = P.ctx;
@@ -161,13 +260,14 @@ function drawScope(opt) {
   ctx.beginPath();
   ctx.arc(scopeC.x, scopeC.y, D / 2, 0, Math.PI * 2);
   ctx.clip();
-  scene.draw(ctx, d.sc, opt.cam || d.cam, scopeC.x, scopeC.y, D, {
+  const cam = opt.cam || d.cam;
+  scene.draw(ctx, d.sc, cam, scopeC.x, scopeC.y, D, {
     glint: d.glint(),
     enemyDrop: opt.enemyDrop || 0,
+    t: G.t,
   });
 
   // 每一枪的弹孔：打在哪儿都看得见
-  const cam = opt.cam || d.cam;
   d.impacts.forEach((imp) => {
     if (imp.kind === 'hit') return;
     const ix = scopeC.x + imp.x - cam.x;
@@ -195,13 +295,11 @@ function drawScope(opt) {
     ctx.stroke();
   });
 
-  // 打空：枪口火光照亮镜头下沿
   if (G.missFlash > 0) {
     ctx.fillStyle = 'rgba(255,220,120,' + (G.missFlash * 0.5).toFixed(2) + ')';
     ctx.fillRect(scopeC.x - D / 2, scopeC.y, D, D / 2);
   }
 
-  // 镜片暗角
   const vg = ctx.createRadialGradient(scopeC.x, scopeC.y, D * 0.3, scopeC.x, scopeC.y, D / 2);
   vg.addColorStop(0, 'rgba(0,0,0,0)');
   vg.addColorStop(1, 'rgba(10,5,20,0.55)');
@@ -220,7 +318,6 @@ function drawScope(opt) {
 
   if (!opt.noCross) drawCrosshair(ctx, scopeC.x + d.sway.x, scopeC.y + d.sway.y, d.steadiness());
 
-  // 眨眼：上下眼皮合上再张开
   if (d.blinkMs >= 0) {
     const half = d.dcfg.blinkMs / 2;
     const k = d.blinkMs < half ? d.blinkMs / half : 1 - (d.blinkMs - half) / half;
@@ -234,17 +331,19 @@ function drawScope(opt) {
     ctx.fillRect(scopeC.x - D / 2, scopeC.y - D / 2, D, D);
   }
   ctx.restore();
+  scopeRing(ctx, scopeC.x, scopeC.y, D);
+}
 
-  // 镜筒外圈
+function scopeRing(ctx, x, y, d) {
   ctx.lineWidth = 10;
   ctx.strokeStyle = '#2b2438';
   ctx.beginPath();
-  ctx.arc(scopeC.x, scopeC.y, D / 2 + 4, 0, Math.PI * 2);
+  ctx.arc(x, y, d / 2 + 4, 0, Math.PI * 2);
   ctx.stroke();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#6d6380';
   ctx.beginPath();
-  ctx.arc(scopeC.x, scopeC.y, D / 2 + 9, 0, Math.PI * 2);
+  ctx.arc(x, y, d / 2 + 9, 0, Math.PI * 2);
   ctx.stroke();
 }
 
@@ -302,17 +401,35 @@ function drawHud() {
   const ctx = P.ctx;
   const d = G.duel;
 
-  // 左上：这一关第几个对手
+  // 左上：第几场、这一场第几个对手
+  ctx.fillStyle = '#f4f1de';
+  ctx.font = '800 12px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('第 ' + G.matchNo + ' 场', 16, 20);
   for (let i = 0; i < config.duelsPerLevel; i++) {
     const px = 24 + i * 22;
     ctx.beginPath();
-    ctx.arc(px, 40, 7, 0, Math.PI * 2);
+    ctx.arc(px, 42, 7, 0, Math.PI * 2);
     ctx.fillStyle = i < G.results.length ? '#ffd23f' : i === G.duelIndex ? '#f4f1de' : '#4a4060';
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = INK;
     ctx.stroke();
   }
+
+  // 右上：手里的临场卡
+  G.cards.forEach((id, i) => {
+    const c = team.CARDS.find((x) => x.id === id);
+    const cx = L.W - 22 - i * 30;
+    roundRect(ctx, cx - 12, 28, 24, 30, 4);
+    ctx.fillStyle = '#f2d8a7';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    cut.cardIcon(ctx, c.icon, cx, 43, 0.42);
+  });
 
   // 正中上方：对面的镜片，越红越快找到你
   const mx = L.W / 2;
@@ -338,6 +455,20 @@ function drawHud() {
   ctx.arc(mx - 5, my - 5, 3, 0, Math.PI * 2);
   ctx.fill();
   if (d.locked) comicText(ctx, d.drawLeft >= 0 ? '他要开枪！' : '他找到你了', mx, scopeC.y - D / 2 + 34, d.drawLeft >= 0 ? 24 : 16, '#ff4d5e');
+  else if (d.peekCue()) {
+    // 观察手（或耳机卡）报点
+    const k = Math.min(1, G.modeT * 8);
+    roundRect(ctx, mx - 74, scopeC.y - D / 2 + 16, 148, 30, 15);
+    ctx.fillStyle = '#2e86ab';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 15px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎧 要出来了！', mx, scopeC.y - D / 2 + 31 + (1 - k) * 4);
+  }
 
   // 左下：眨眼按钮，外圈是眼睛酸度
   ctx.beginPath();
@@ -370,15 +501,14 @@ function drawHud() {
     ctx.lineWidth = 6;
     ctx.strokeStyle = '#f4f1de';
     ctx.beginPath();
-    ctx.arc(trigBtn.x, trigBtn.y, trigBtn.r - 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - d.reloadSec / config.shot.reloadSec));
+    ctx.arc(trigBtn.x, trigBtn.y, trigBtn.r - 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - d.reloadSec / (config.shot.reloadSec * d.mods.reloadMul)));
     ctx.stroke();
   }
 
-  // 扳机左上：心跳
   const beat = Math.pow(Math.max(0, Math.sin(d.t * Math.PI * 2 * (1.1 * d.heart))), 8);
   drawHeart(ctx, trigBtn.x - trigBtn.r - 6, trigBtn.y - trigBtn.r + 2, 9 + beat * 3);
 
-  if (G.levelNo === 1 && G.duelIndex === 0 && G.mode === 'play') {
+  if (G.matchNo === 1 && G.duelIndex === 0 && G.mode === 'play') {
     if (d.blinks < 2) pulse(ctx, eyeBtn);
     else if (d.shots === 0 && !d.holding) pulse(ctx, trigBtn);
   }
@@ -414,20 +544,30 @@ function drawHeart(ctx, x, y, s) {
   ctx.stroke();
 }
 
-function button(id, label, x, y, w, h, fn, primary) {
+// —— 画：按钮和面板 ——
+function button(id, label, x, y, w, h, fn, primary, disabled) {
   const ctx = P.ctx;
   roundRect(ctx, x, y, w, h, 12);
-  ctx.fillStyle = primary ? '#ffd23f' : '#3a3150';
+  ctx.fillStyle = disabled ? '#2b2438' : primary ? '#ffd23f' : '#3a3150';
   ctx.fill();
   ctx.lineWidth = 3;
   ctx.strokeStyle = INK;
   ctx.stroke();
-  ctx.fillStyle = primary ? INK : '#f4f1de';
-  ctx.font = '800 18px sans-serif';
+  ctx.fillStyle = disabled ? '#6d6380' : primary ? INK : '#f4f1de';
+  ctx.font = '800 ' + (h < 40 ? 14 : 18) + 'px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, x + w / 2, y + h / 2 + 1);
   G.buttons.push({ id, x, y, w, h, fn });
+}
+
+function text(str, x, y, size, color, align, weight) {
+  const ctx = P.ctx;
+  ctx.fillStyle = color || '#f4f1de';
+  ctx.font = (weight || 600) + ' ' + size + 'px sans-serif';
+  ctx.textAlign = align || 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(str, x, y);
 }
 
 function panel(title, sub) {
@@ -435,16 +575,11 @@ function panel(title, sub) {
   ctx.fillStyle = 'rgba(10,6,18,0.72)';
   ctx.fillRect(0, 0, L.W, L.H);
   comicText(ctx, title, L.W / 2, L.H * 0.3, 44);
-  if (sub) {
-    ctx.fillStyle = '#f4f1de';
-    ctx.font = '600 15px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(sub, L.W / 2, L.H * 0.3 + 44);
-  }
+  if (sub) text(sub, L.W / 2, L.H * 0.3 + 44, 15);
 }
 
-// 漫画格：开场和对手登场（以后换成戴夫式贴图快动画）
-function comicPanel(title, sub) {
+// 漫画格：第几场、对手登场
+function comicPanel(title, sub, sub2) {
   const ctx = P.ctx;
   const k = easeOut(clamp(G.modeT / 0.25, 0, 1));
   ctx.fillStyle = 'rgba(10,6,18,0.6)';
@@ -468,13 +603,9 @@ function comicPanel(title, sub) {
     ctx.lineTo(Math.cos(a) * 170, Math.sin(a) * 100);
     ctx.stroke();
   }
-  comicText(ctx, title, 0, -10, 36);
-  if (sub) {
-    ctx.fillStyle = INK;
-    ctx.font = '700 15px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(sub, 0, 40);
-  }
+  comicText(ctx, title, 0, -22, 36);
+  if (sub) text(sub, 0, 28, 16, INK, 'center', 800);
+  if (sub2) text(sub2, 0, 52, 13, INK, 'center', 600);
   ctx.restore();
 }
 
@@ -485,10 +616,8 @@ function drawHit() {
   const aimX = scopeC.x + (d.hitAt.x - d.cam.x);
   const aimY = scopeC.y + (d.hitAt.y - d.cam.y);
   drawScope({ enemyDrop: t > 0.45 ? easeOut(clamp((t - 0.45) / 0.5, 0, 1)) * 14 : 0, noCross: true });
-  // 慢镜头回放：松手那一刻准星停在哪
   if (t < 0.9) drawCrosshair(ctx, aimX, aimY, 'steady');
   if (t < 0.45) {
-    // 子弹慢镜头
     const k = t / 0.45;
     const sx = scopeC.x;
     const sy = scopeC.y + D / 2;
@@ -503,65 +632,14 @@ function drawHit() {
     starburst(ctx, aimX, aimY, 70 * k, 42 * k, 12, '#ff4d5e');
     comicText(ctx, '嘣！', aimX, aimY, 44 * k);
     comicText(ctx, '爆头', aimX, aimY + 52, 18 * k, '#f4f1de');
-  }
-}
-
-function drawRescue() {
-  // 第一人称：倒在地上往上看，女队友伸手把你拉起来
-  const ctx = P.ctx;
-  const t = G.modeT;
-  const lift = t > 1.2 ? easeOut(clamp((t - 1.2) / 0.6, 0, 1)) : 0;
-  ctx.save();
-  ctx.translate(0, -lift * 40);
-  drawScope({ noCross: true, tint: 'rgba(60,60,70,' + (0.65 * (1 - lift)).toFixed(2) + ')' });
-  ctx.restore();
-  const k = easeOut(clamp(t / 0.7, 0, 1));
-  const hx = L.W + 40 - (L.W * 0.55 + 40) * k;
-  const hy = -40 + (scopeC.y - 10 + 40) * k - lift * 60;
-  ctx.save();
-  ctx.translate(hx, hy);
-  ctx.rotate(-0.6);
-  ctx.fillStyle = '#2e86ab';
-  ctx.fillRect(0, -22, 220, 44);
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = INK;
-  ctx.strokeRect(0, -22, 220, 44);
-  ctx.fillStyle = '#e84855';
-  ctx.fillRect(-6, -20, 10, 40);
-  ctx.fillStyle = '#f1c6a8';
-  ctx.beginPath();
-  ctx.arc(-26, 0, 26, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  const grip = t > 0.75 ? 1 : 0;
-  for (let i = 0; i < 4; i++) {
-    ctx.beginPath();
-    ctx.arc(-50 + grip * 10, -16 + i * 11, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-  }
-  ctx.restore();
-  if (t > 0.4) {
-    const bx = 26;
-    const by = scopeC.y + D / 2 - 40;
-    roundRect(ctx, bx, by, 210, 46, 14);
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = INK;
-    ctx.stroke();
-    ctx.fillStyle = INK;
-    ctx.font = '800 19px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('起来，还没完！', bx + 105, by + 24);
+    if (t > 0.8) comicText(ctx, '+¥' + Math.round(config.money.perKill * team.BASES[team.state().base].mul), L.W / 2, scopeC.y + D / 2 + 26, 20, '#90ee90');
   }
 }
 
 function drawFail() {
   const ctx = P.ctx;
   const d = G.duel;
-  const head = scene.enemyHead(d.sc);
+  const head = scene.enemyHead(d.sc, 1);
   const cam = { x: clamp(head.x, D / 2, d.sc.w - D / 2), y: clamp(head.y, D / 2, d.sc.h - D / 2) };
   drawScope({ cam, noCross: true });
   const ex = scopeC.x + head.x - cam.x;
@@ -572,32 +650,159 @@ function drawFail() {
   ctx.arc(ex, ey + 4, 22 + Math.sin(G.modeT * 6) * 3, 0, Math.PI * 2);
   ctx.stroke();
   comicText(ctx, '他在这儿！', ex, ey - 40, 22, '#ffffff');
-  comicText(ctx, '差一点！', L.W / 2, scopeC.y + D / 2 + 46, 40);
-  button('retry', '再试一次', L.W / 2 - 90, L.H - 110, 180, 54, () => startLevel(), true);
+  comicText(ctx, '差一点！', L.W / 2, scopeC.y + D / 2 + 40, 40);
+  button('retry', '重打这一场', L.W / 2 - 100, L.H - 150, 200, 54, () => startMatch(), true);
+  button('home', '回主页', L.W / 2 - 60, L.H - 84, 120, 42, goTitle);
 }
 
-function drawWin() {
+// —— 开场 ——
+function drawTitle() {
   const ctx = P.ctx;
-  panel('拿下！', '第 ' + G.levelNo + ' 关');
-  ctx.font = '600 16px sans-serif';
-  ctx.fillStyle = '#f4f1de';
-  ctx.textAlign = 'center';
-  G.results.forEach((r, i) => {
-    ctx.fillText('对手 ' + (i + 1) + '　' + r.sec.toFixed(1) + ' 秒　眨眼 ' + r.blinks + ' 次', L.W / 2, L.H * 0.45 + i * 30);
+  const sc = G.title.sc;
+  const t = G.modeT;
+  const d = Math.min(L.W * 0.82, L.H * 0.42);
+  const tc = { x: L.W / 2, y: L.H * 0.3 + d / 2 + 10 };
+  // 镜子慢慢扫过一片城
+  const cam = { x: sc.w / 2 + Math.sin(t * 0.25) * (sc.w / 2 - d / 2 - 10), y: sc.h / 2 + Math.sin(t * 0.17) * 40 };
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(tc.x, tc.y, d / 2, 0, Math.PI * 2);
+  ctx.clip();
+  scene.draw(ctx, sc, cam, tc.x, tc.y, d, { t: G.t, glint: Math.sin(t * 2) > 0.92 });
+  ctx.fillStyle = 'rgba(10,5,20,0.15)';
+  ctx.fillRect(0, 0, L.W, L.H);
+  ctx.strokeStyle = 'rgba(27,21,48,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(tc.x - d / 2, tc.y);
+  ctx.lineTo(tc.x + d / 2, tc.y);
+  ctx.moveTo(tc.x, tc.y - d / 2);
+  ctx.lineTo(tc.x, tc.y + d / 2);
+  ctx.stroke();
+  ctx.restore();
+  scopeRing(ctx, tc.x, tc.y, d);
+  cut.logo(ctx, L, t);
+  text('眨眼找人 · 屏息开枪', L.W / 2, L.H * 0.14 + 92, 14, '#f4f1de', 'center', 700);
+
+  const S = team.state();
+  const by = Math.min(L.H - 150, tc.y + d / 2 + 30);
+  button('start', S.cups ? '再打一次网吧赛' : '开始比赛', L.W / 2 - 110, by, 220, 58, startRun, true);
+  button('team', S.revealed ? '战队' : '🔒 战队', L.W / 2 - 80, by + 74, 160, 44, () => {
+    if (S.revealed) setMode('team');
+    else toast('赢下第一次网吧赛就知道了');
   });
-  button(
-    'next',
-    '下一关',
-    L.W / 2 - 90,
-    L.H - 120,
-    180,
-    54,
-    () => {
-      G.levelNo += 1;
-      startLevel();
-    },
-    true
-  );
+  if (S.money) text('奖金 ¥' + S.money, L.W / 2, by + 136, 13, '#ffd23f', 'center', 800);
+}
+
+// —— 选卡：三选一 ——
+function drawPick() {
+  const ctx = P.ctx;
+  ctx.fillStyle = '#1a1030';
+  ctx.fillRect(0, 0, L.W, L.H);
+  comicText(ctx, '选一张', L.W / 2, L.H * 0.16, 38);
+  text('带进下一场（这次网吧赛一直有效）', L.W / 2, L.H * 0.16 + 38, 13);
+  const cw = 108;
+  const ch = 170;
+  const gap = 10;
+  const x0 = (L.W - cw * 3 - gap * 2) / 2;
+  const y0 = L.H * 0.32;
+  G.offer.forEach((c, i) => {
+    const k = easeOut(clamp((G.modeT - i * 0.12) / 0.3, 0, 1));
+    if (k <= 0) return;
+    const x = x0 + i * (cw + gap);
+    const y = y0 + (1 - k) * 60;
+    ctx.save();
+    ctx.globalAlpha = k;
+    roundRect(ctx, x, y, cw, ch, 10);
+    ctx.fillStyle = '#f2d8a7';
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    cut.cardIcon(ctx, c.icon, x + cw / 2, y + 52, 1.1);
+    text(c.name, x + cw / 2, y + 108, 17, INK, 'center', 900);
+    text(c.desc, x + cw / 2, y + 136, 12, INK, 'center', 700);
+    ctx.restore();
+    if (k >= 1) G.buttons.push({ id: 'card' + i, x, y, w: cw, h: ch, fn: () => pickCard(c.id) });
+  });
+  if (G.cards.length) {
+    text('已经有：' + G.cards.map((id) => team.CARDS.find((x) => x.id === id).name).join('、'), L.W / 2, y0 + ch + 40, 13, '#c9c2e0');
+  }
+}
+
+// —— 战队页 ——
+function drawTeam() {
+  const ctx = P.ctx;
+  const S = team.state();
+  ctx.fillStyle = S.base >= 2 ? '#14233a' : S.base === 1 ? '#1e1838' : '#1a1030';
+  ctx.fillRect(0, 0, L.W, L.H);
+  comicText(ctx, '战队', 60, 44, 32);
+  text('奖金 ¥' + S.money, L.W - 16, 34, 16, '#ffd23f', 'right', 900);
+  text('粉丝 ' + S.fans + ' · 冠军 ' + S.cups, L.W - 16, 56, 12, '#c9c2e0', 'right', 700);
+
+  // 训练基地
+  const base = team.BASES[S.base];
+  const next = team.BASES[S.base + 1];
+  roundRect(ctx, 14, 78, L.W - 28, 54, 10);
+  ctx.fillStyle = '#2b2438';
+  ctx.fill();
+  text('🏠 ' + base.name, 28, 96, 15, '#f4f1de', 'left', 900);
+  text('奖金 ×' + base.mul, 28, 117, 12, '#c9c2e0', 'left', 600);
+  if (next) button('base', '升级 ¥' + base.cost, L.W - 130, 88, 106, 34, () => {
+    if (!team.upgradeBase()) toast('奖金不够');
+    else toast('搬进' + team.BASES[S.base].name + '！');
+  }, S.money >= base.cost, S.money < base.cost);
+  else text('满级', L.W - 40, 105, 13, '#ffd23f', 'right', 800);
+
+  const top = 146;
+  const rowH = Math.min(92, (L.H - top - 80) / team.TEAMMATES.length);
+  team.TEAMMATES.forEach((m, i) => {
+    const y = top + i * rowH;
+    const lv = S.team[m.id] || 0;
+    roundRect(ctx, 14, y, L.W - 28, rowH - 8, 10);
+    ctx.fillStyle = '#3a3150';
+    ctx.fill();
+    // 头像
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(46, y + (rowH - 8) / 2, 26, 0, Math.PI * 2);
+    ctx.fillStyle = '#f2d8a7';
+    ctx.fill();
+    ctx.clip();
+    cut.person(ctx, 46, y + (rowH - 8) / 2 + 82, 0.9, m.look, { smile: true, team: '#ffd23f' });
+    ctx.restore();
+    text(m.name + '  ' + m.role, 82, y + 18, 15, '#f4f1de', 'left', 900);
+    text('【' + m.buff + '】' + m.desc(lv), 82, y + 40, 11, '#ffd23f', 'left', 700);
+    for (let k = 0; k < team.MAX_LV; k++) {
+      ctx.beginPath();
+      ctx.arc(88 + k * 14, y + 60, 5, 0, Math.PI * 2);
+      ctx.fillStyle = k < lv ? '#ffd23f' : '#2b2438';
+      ctx.fill();
+    }
+    if (lv < team.MAX_LV) {
+      const cost = team.trainCost(lv);
+      button('train_' + m.id, '练 ¥' + cost, L.W - 100, y + rowH - 46, 76, 32, () => {
+        if (!team.train(m.id)) toast('奖金不够');
+      }, S.money >= cost, S.money < cost);
+    } else text('满级', L.W - 40, y + rowH - 30, 13, '#ffd23f', 'right', 800);
+  });
+
+  button('back', '回主页', 20, L.H - 66, 120, 44, goTitle);
+  button('replay', '重看揭晓', L.W - 140, L.H - 66, 120, 44, () => setMode('reveal'));
+}
+
+// —— 网吧赛赢了 ——
+function drawReveal(champ) {
+  const ctx = P.ctx;
+  const t = champ ? 3.4 + Math.min(G.modeT, 4) + 0.6 : G.modeT;
+  cut.revealScene(ctx, L, t, team.TEAMMATES, { title: champ ? '冠军！' : '职业战队！' });
+  const done = champ ? G.modeT > 1.2 : G.modeT > cut.REVEAL_SEC - 0.6;
+  if (!champ && !done && G.modeT > 1) text('点一下跳过', L.W - 16, L.H - 20, 11, 'rgba(244,241,222,0.5)', 'right');
+  if (done) {
+    text('这次网吧赛奖金 ¥' + G.earned, L.W / 2, L.H - 150, 15, '#ffd23f', 'center', 900);
+    button('toTeam', '进入战队', L.W / 2 - 110, L.H - 126, 220, 54, () => setMode('team'), true);
+    button('home2', '回主页', L.W / 2 - 60, L.H - 62, 120, 40, goTitle);
+  }
 }
 
 function render() {
@@ -608,40 +813,55 @@ function render() {
   ctx.fillRect(0, 0, L.W, L.H);
   const m = G.mode;
 
-  if (m === 'hit') drawHit();
-  else if (m === 'rescue') drawRescue();
+  if (m === 'title') drawTitle();
+  else if (m === 'team') drawTeam();
+  else if (m === 'pick') drawPick();
+  else if (m === 'reveal') drawReveal(false);
+  else if (m === 'champ') drawReveal(true);
+  else if (m === 'clear') cut.matchClear(ctx, L, G.modeT, G.matchNo, MATCHES, team.state().fans);
+  else if (m === 'move') cut.relocate(ctx, L, G.modeT, G.duel.sc.theme, scopeC, D);
+  else if (m === 'rescue') {
+    cut.rescue(ctx, L, G.modeT, G.duel.sc.theme);
+    const left = cut.RESCUE_SEC - G.modeT;
+    if (left < 0.4) cut.iris(ctx, L, scopeC.x, scopeC.y, lerp(D / 2, L.H, left / 0.4));
+  } else if (m === 'hit') drawHit();
   else if (m === 'fail') drawFail();
-  else if (m !== 'win') drawScope({ tint: m === 'dead' ? 'rgba(120,20,30,0.45)' : null });
+  else drawScope({ tint: m === 'dead' ? 'rgba(120,20,30,0.45)' : null });
 
   if (m === 'play' || m === 'hit' || m === 'intro' || m === 'story') drawHud();
 
-  if (m === 'story') comicPanel('第 ' + G.levelNo + ' 场', '废墟之城 · 三个狙击手');
-  else if (m === 'intro') {
+  if (m === 'story') {
+    const mt = match();
+    comicPanel(mt.name, mt.place + ' · 三个狙击手', G.cards.length ? '带着 ' + G.cards.length + ' 张卡' : '');
+  } else if (m === 'intro') {
     const dc = G.duel.dcfg;
-    comicPanel('对手 ' + (G.duelIndex + 1) + ' / ' + config.duelsPerLevel, dc.name + ' · ' + dc.sub);
-  }
-  else if (m === 'dead') {
+    comicPanel('对手 ' + (G.duelIndex + 1) + ' / ' + config.duelsPerLevel, G.duel.sc.theme.name + ' · ' + dc.name, dc.sub);
+  } else if (m === 'dead') {
     panel('你出局了');
     button('rescue', '▶ 叫队友拉你', L.W / 2 - 110, L.H * 0.52, 220, 58, callTeammate, true);
     button('giveup', '不了', L.W / 2 - 60, L.H * 0.52 + 76, 120, 44, () => setMode('fail'));
   } else if (m === 'ad') {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, L.W, L.H);
-    ctx.fillStyle = '#9a90b0';
-    ctx.font = '600 16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('广告占位（上线后换成激励视频）', L.W / 2, L.H / 2 - 10);
-    ctx.font = '900 40px sans-serif';
-    ctx.fillText(String(Math.ceil(config.fakeAdSec - G.modeT)), L.W / 2, L.H / 2 + 44);
+    text('广告占位（上线后换成激励视频）', L.W / 2, L.H / 2 - 10, 16, '#9a90b0');
+    text(String(Math.ceil(config.fakeAdSec - G.modeT)), L.W / 2, L.H / 2 + 44, 40, '#9a90b0', 'center', 900);
   } else if (m === 'adWait') {
     ctx.fillStyle = 'rgba(0,0,0,0.8)';
     ctx.fillRect(0, 0, L.W, L.H);
-  } else if (m === 'win') drawWin();
+  }
 
-  ctx.fillStyle = 'rgba(244,241,222,0.35)';
-  ctx.font = '500 10px sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText(config.version, L.W - 10, L.H - 10);
+  if (G.toast) {
+    const a = Math.min(1, (2.2 - G.toast.t) * 3);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, a);
+    roundRect(ctx, L.W / 2 - 140, L.H * 0.8, 280, 40, 20);
+    ctx.fillStyle = '#f4f1de';
+    ctx.fill();
+    text(G.toast.text, L.W / 2, L.H * 0.8 + 20, 14, INK, 'center', 800);
+    ctx.restore();
+  }
+
+  text(config.version, L.W - 10, L.H - 8, 10, 'rgba(244,241,222,0.35)', 'right', 500);
 }
 
 let last = platform.now();
@@ -654,6 +874,8 @@ function frame() {
   platform.nextFrame(frame);
 }
 
-startLevel();
-platform.exposeForTest('__vasily', { G, config, scene, scopeC, D, eyeBtn, trigBtn, scale, setMode, startLevel });
+goTitle();
+startMatch(); // 先把第一场备好（开场背后不画它），点「开始比赛」再从头开
+setMode('title');
+platform.exposeForTest('__vasily', { _sd: startDuel, G, config, scene, team, cut, scopeC, D, eyeBtn, trigBtn, scale, setMode, startRun, startMatch, afterClear });
 platform.nextFrame(frame);

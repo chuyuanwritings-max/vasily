@@ -5,18 +5,24 @@
 // 0.2 的开枪博弈：他会「缩着 → 探头 → 缩回去」，只有探头时打得中；
 // 你屏息只能稳两秒左右，所以要读他的节奏，提前按住。
 // 他找到你以后，下一次探头就开枪：镜片一闪，谁先开枪谁赢。
+//
+// 0.3：opts.mods 是队友和卡牌给的加成（team.js 算好传进来），这里只管照着用。
 const scene = require('./scene.js');
 const { clamp, lerp, easeOut, rng } = require('./util.js');
 
 const RISE_SEC = 0.25; // 探头、缩头的动作要多久
 const FAKE_SEC = 0.3; // 假探头露多久
-const HITTABLE_LIFT = 0.6; // 头抬到多高才算露出来
+const HITTABLE_LIFT = 0.45; // 头抬到多高才算露出来
+const CUE_SEC = 0.8; // 观察手提前多久喊「要出来了」
+
+const NO_MODS = { hitRadiusAdd: 0, settleMul: 1, holdMaxAdd: 0, heartMul: 1, quickDrawAdd: 0, enemyRateMul: 1, blinkCostMul: 1, reloadMul: 1, peekCue: false };
 
 function createDuel(opts) {
   const cfg = opts.config;
   const idx = Math.min(opts.duelIndex, cfg.duels.length - 1);
   const dcfg = cfg.duels[idx];
-  const sc = scene.build(opts.seed, dcfg, opts.scopeD);
+  const mods = Object.assign({}, NO_MODS, opts.mods || {});
+  const sc = scene.build(opts.seed, dcfg, opts.scopeD, opts.theme);
   const half = opts.scopeD / 2;
   const rand = rng(opts.seed ^ 0x5bd1e995);
   const peekScale = Math.max(cfg.peekMinScale, 1 - cfg.peekShrinkPerLevel * (opts.levelNo - 1));
@@ -26,8 +32,9 @@ function createDuel(opts) {
     dcfg,
     levelNo: opts.levelNo,
     duelIndex: opts.duelIndex,
-    hitRadius: cfg.hitRadius(opts.duelIndex, opts.levelNo),
-    quickDrawSec: cfg.quickDrawSec[Math.min(idx, cfg.quickDrawSec.length - 1)],
+    mods,
+    hitRadius: cfg.hitRadius(opts.duelIndex, opts.levelNo) + mods.hitRadiusAdd,
+    quickDrawSec: cfg.quickDrawSec[Math.min(idx, cfg.quickDrawSec.length - 1)] + mods.quickDrawAdd,
     cam: { x: sc.w / 2, y: sc.h / 2 },
     t: 0,
     state: 'play', // play → hit / dead
@@ -64,7 +71,7 @@ function createDuel(opts) {
     d.blinkApplied = false;
     d.blinks += 1;
     d.eyeOpenSec = 0;
-    if (!d.locked) d.progress = Math.min(1, d.progress + dcfg.blinkCost);
+    if (!d.locked) d.progress = Math.min(1, d.progress + dcfg.blinkCost * mods.blinkCostMul);
     return true;
   };
 
@@ -97,12 +104,13 @@ function createDuel(opts) {
 
   function fire() {
     d.shots += 1;
-    d.reloadSec = cfg.shot.reloadSec;
+    d.reloadSec = cfg.shot.reloadSec * mods.reloadMul;
     const aim = d.aimWorld();
-    const head = scene.enemyHead(sc);
+    const head = scene.enemyHead(sc, 1);
     const dist = Math.hypot(aim.x - head.x, aim.y - head.y);
     const exposed = sc.enemy.lift >= HITTABLE_LIFT;
     let kind;
+    // 判定按「他探出头时头在哪」算：他探头到一半（lift ≥ 0.45）也算打中
     if (exposed && dist <= d.hitRadius) kind = 'hit';
     else if (!exposed && dist <= d.hitRadius + 6) kind = 'covered'; // 瞄对了，但他缩着
     else if (dist <= d.hitRadius * 2.5) kind = 'close';
@@ -128,23 +136,30 @@ function createDuel(opts) {
     const free = b.amp * d.heart;
     if (!d.holding) return free;
     const steady = b.holdMinAmp * Math.sqrt(d.heart);
+    const settle = b.settleSec * mods.settleMul;
+    const holdMax = b.holdMaxSec + mods.holdMaxAdd;
     // 先慢后快地稳下来：按住越久越稳，不会一按就稳
-    if (d.holdSec < b.settleSec) { const k = d.holdSec / b.settleSec; return lerp(free, steady, k * k); }
-    if (d.holdSec < b.holdMaxSec) return steady;
-    return steady + (d.holdSec - b.holdMaxSec) * b.tremorPerSec;
+    if (d.holdSec < settle) { const k = d.holdSec / settle; return lerp(free, steady, k * k); }
+    if (d.holdSec < holdMax) return steady;
+    return steady + (d.holdSec - holdMax) * b.tremorPerSec;
   }
 
   d.steadiness = function () {
     const b = cfg.breath;
     if (d.recoverSec > 0 && !d.holding) return 'recover';
     if (!d.holding) return 'free';
-    if (d.holdSec < b.settleSec) return 'settling';
-    if (d.holdSec < b.holdMaxSec) return 'steady';
+    if (d.holdSec < b.settleSec * mods.settleMul) return 'settling';
+    if (d.holdSec < b.holdMaxSec + mods.holdMaxAdd) return 'steady';
     return 'tremble';
   };
 
   d.exposed = function () {
     return sc.enemy.lift >= HITTABLE_LIFT;
+  };
+
+  // 观察手在耳机里喊「要出来了」：他快探头时返回 true（假探头也会喊，她也会被骗）
+  d.peekCue = function () {
+    return mods.peekCue && d.state === 'play' && d.enemy.mode === 'hide' && d.enemy.timer < CUE_SEC;
   };
 
   // 他的节奏：缩着 → 探头（或假探头）→ 缩回去
@@ -188,7 +203,7 @@ function createDuel(opts) {
     }
 
     if (!d.locked) {
-      d.progress += dcfg.enemyRate * dt;
+      d.progress += dcfg.enemyRate * mods.enemyRateMul * dt;
       if (d.progress >= 1) {
         d.progress = 1;
         d.locked = true;
@@ -207,7 +222,8 @@ function createDuel(opts) {
       }
     }
 
-    d.heart = Math.min(cfg.heart.max, 1 + d.blinks * cfg.heart.perBlink + d.progress * cfg.heart.perProgress + (d.drawLeft >= 0 ? 0.4 : 0));
+    const rise = d.blinks * cfg.heart.perBlink + d.progress * cfg.heart.perProgress + (d.drawLeft >= 0 ? 0.3 : 0);
+    d.heart = Math.min(cfg.heart.max, 1 + rise * mods.heartMul);
     if (d.reloadSec > 0) d.reloadSec = Math.max(0, d.reloadSec - dt);
     if (d.recoverSec > 0 && !d.holding) d.recoverSec = Math.max(0, d.recoverSec - dt);
     if (d.holding) d.holdSec += dt;
@@ -218,6 +234,19 @@ function createDuel(opts) {
     const tremor = d.steadiness() === 'tremble' ? Math.sin(d.t * 37) * amp * 0.3 : 0;
     d.sway.y = amp * Math.sin(d.phase);
     d.sway.x = amp * 0.35 * Math.sin(d.phase * 2 + 0.7) + tremor;
+
+    // 吸附：屏息时准星离他的头（探头时的位置）够近，镜头被轻轻拉过去
+    if (d.holding && cfg.assist) {
+      const head = scene.enemyHead(sc, 1);
+      const dx = head.x - d.cam.x;
+      const dy = head.y - d.cam.y;
+      const ar = cfg.assist.radius;
+      const radius = Array.isArray(ar) ? ar[Math.min(opts.levelNo, ar.length) - 1] : ar;
+      if (Math.hypot(dx, dy) < radius) {
+        const k = Math.min(1, cfg.assist.perSec * dt);
+        d.pan(-dx * k, -dy * k);
+      }
+    }
   };
 
   d.glint = function () {

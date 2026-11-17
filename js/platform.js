@@ -92,8 +92,28 @@ function showRewardedAd(adUnitId, onReward, onSkip) {
   return true;
 }
 
+// 存档：微信用 wx.setStorageSync，浏览器用 localStorage
+function load(key) {
+  try {
+    const raw = isWx ? wx.getStorageSync(key) : window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function save(key, value) {
+  try {
+    const raw = JSON.stringify(value);
+    if (isWx) wx.setStorageSync(key, raw);
+    else window.localStorage.setItem(key, raw);
+  } catch (e) {
+    // 存不了就算了：原型里不影响玩
+  }
+}
+
 function exposeForTest(name, value) {
   if (!isWx && typeof window !== 'undefined') window[name] = value;
 }
 
-module.exports = { isWx, setup, now, nextFrame, vibrate, showRewardedAd, exposeForTest };
+module.exports = { isWx, setup, now, nextFrame, vibrate, showRewardedAd, load, save, exposeForTest };
