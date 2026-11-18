@@ -49,10 +49,17 @@ function build(seed, duelCfg, D, themeId) {
       w.y + w.h / 2 < WORLD_H - half
   );
   const spot = spots[Math.floor(r() * spots.length)];
+  // 狡猾型的假人（头盔挑在杆子上）：离真人远一点的另一扇窗
+  let decoy = null;
+  if (duelCfg.decoy) {
+    const far = spots.filter((w) => Math.abs(w.x - spot.x) + Math.abs(w.y - spot.y) > 140);
+    const dw = far.length ? far[Math.floor(r() * far.length)] : null;
+    if (dw) decoy = { win: dw, lift: 0 };
+  }
 
   // 干扰：会在你眨眼时变的东西
   const distractors = [];
-  const free = allWindows.filter((w) => !w.bricked && w !== spot);
+  const free = allWindows.filter((w) => !w.bricked && w !== spot && (!decoy || w !== decoy.win));
   for (let i = free.length - 1; i > 0; i--) {
     const j = Math.floor(r() * (i + 1));
     const tmp = free[i];
@@ -112,6 +119,7 @@ function build(seed, duelCfg, D, themeId) {
     far,
     bags,
     flakes,
+    decoy,
     enemy: {
       win: spot,
       pose: r() < 0.5 ? 0 : 1,
@@ -130,6 +138,11 @@ function enemyHead(sc, lift) {
   const l = lift === undefined ? e.lift : lift;
   const dx = e.pose ? e.shift : -e.shift;
   return { x: e.win.x + e.win.w / 2 + dx, y: e.win.y + 8 + (1 - l) * DUCK };
+}
+
+function decoyHead(sc) {
+  const q = sc.decoy;
+  return { x: q.win.x + q.win.w / 2, y: q.win.y + 8 + (1 - q.lift) * DUCK };
 }
 
 function toggle(d) {
@@ -545,6 +558,22 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
     ctx.lineTo(ox + head.x - 4 - (e.pose ? 7 : 4), oy + e.win.y + e.win.h + 2);
     ctx.stroke();
   }
+  if (sc.decoy) {
+    // 假人：头盔挑在杆子上。跟真人比，头顶是平弧、没有肩膀、没有枪管
+    const q = sc.decoy;
+    const dh = decoyHead(sc);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ox + q.win.x, oy + q.win.y, q.win.w, q.win.h);
+    ctx.clip();
+    ctx.fillStyle = e.color;
+    ctx.beginPath();
+    ctx.arc(ox + dh.x, oy + dh.y + 1, 5.5, Math.PI, 0);
+    ctx.fill();
+    ctx.fillRect(ox + dh.x - 6.5, oy + dh.y, 13, 2);
+    ctx.fillRect(ox + dh.x - 1, oy + dh.y + 2, 2, 20);
+    ctx.restore();
+  }
   if (th.win === 'lattice') {
     sc.buildings.forEach((b) => b.windows.forEach((w) => !w.bricked && drawLattice(ctx, w, ox, oy)));
   }
@@ -577,4 +606,4 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
   drawWeather(ctx, sc, cam, cx, cy, D, t);
 }
 
-module.exports = { build, draw, enemyHead, toggle, WORLD_W, WORLD_H, GROUND };
+module.exports = { build, draw, enemyHead, decoyHead, toggle, WORLD_W, WORLD_H, GROUND };

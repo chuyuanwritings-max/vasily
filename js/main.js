@@ -13,6 +13,7 @@ const themes = require('./themes.js');
 const team = require('./team.js');
 const cut = require('./cutscene.js');
 const { createDuel } = require('./duel.js');
+const classic = require('./classic.js');
 const { clamp, lerp, easeOut, roundRect, comicText, starburst, rng } = require('./util.js');
 
 const INK = '#1b1530';
@@ -24,7 +25,9 @@ const scale = P.width / DESIGN_W;
 const L = { W: DESIGN_W, H: P.height / scale };
 const D = Math.min(L.W * 0.94, L.H * 0.56);
 const scopeC = { x: L.W / 2, y: 70 + D / 2 };
-const btnY = Math.min(L.H - 70, scopeC.y + D / 2 + (L.H - scopeC.y - D / 2) / 2);
+// 镜子下面：你这栋楼的小图（他的红圈在上面找你）
+const panelR = { x: L.W / 2 - 150, y: scopeC.y + D / 2 + 12, w: 300, h: Math.min(84, Math.max(60, L.H - scopeC.y - D / 2 - 160)) };
+const btnY = Math.max(panelR.y + panelR.h + 56, Math.min(L.H - 70, scopeC.y + D / 2 + (L.H - scopeC.y - D / 2) / 2 + 30));
 const eyeBtn = { x: L.W * 0.24, y: btnY, r: 38 };
 const trigBtn = { x: L.W * 0.73, y: btnY, r: 50 };
 const MATCHES = config.matches.length;
@@ -100,6 +103,40 @@ function startRun() {
   startMatch();
 }
 
+// 第一次打第一场：先讲一遍怎么玩
+function needHowto() {
+  return !G.howtoSeen && G.matchNo === 1 && G.duelIndex === 0;
+}
+
+function drawHowto() {
+  const ctx = P.ctx;
+  ctx.fillStyle = 'rgba(10,6,18,0.82)';
+  ctx.fillRect(0, 0, scopeC.x * 2, scopeC.y + D / 2 + 4);
+  comicText(ctx, '谁先暴露谁死', L.W / 2, 110, 32);
+  const lines = [
+    ['左下按住 = 缩头', '躲在墙后最安全，但什么都看不见'],
+    ['点一下 = 缩一下再起来', '画面会变一处：找出他'],
+    ['下面这栋楼是你，红圈是他的镜子', '红圈停在你窗口上会锁定你 → 快缩头'],
+    ['红圈在动 = 他探着头在找你', '这也是你唯一打得中他的时候'],
+    ['打空一枪，他马上知道你在哪', ''],
+  ];
+  lines.forEach(([a, b], i) => {
+    const k = clamp((G.modeT - 0.3 - i * 0.5) / 0.3, 0, 1);
+    if (k <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = k;
+    text(a, L.W / 2, 160 + i * 52, 15, '#ffd23f', 'center', 900);
+    if (b) text(b, L.W / 2, 160 + i * 52 + 20, 12, '#f4f1de', 'center', 600);
+    ctx.restore();
+  });
+  if (G.modeT > 2.8) text('点一下开始', L.W / 2, scopeC.y + D / 2 - 14, 12, 'rgba(244,241,222,0.7)');
+}
+
+function startClassic() {
+  G.classic = classic.createClassic(Math.floor(Math.random() * 99999), D, config);
+  setMode('classic');
+}
+
 function goTitle() {
   const ids = themes.ORDER;
   const id = ids[Math.floor(Math.random() * ids.length)];
@@ -112,7 +149,7 @@ function inCircle(b, x, y) {
   return Math.hypot(x - b.x, y - b.y) <= b.r + 8;
 }
 
-const TAP_TO_SKIP = { story: 0.3, intro: 0.3, clear: 1.0, reveal: 1.0, move: 0.6 };
+const TAP_TO_SKIP = { howto: 0.6, story: 0.3, intro: 0.3, clear: 1.0, reveal: 1.0, move: 0.6 };
 
 function onTouch(type, id, sx, sy) {
   const x = sx / scale;
@@ -130,10 +167,18 @@ function onTouch(type, id, sx, sy) {
       touches[id] = { role: 'ui' };
       return;
     }
+    if (G.mode === 'classic') {
+      const c = G.classic;
+      if (c.state !== 'play') return;
+      if (inCircle(eyeBtn, x, y)) { c.toggle(); touches[id] = { role: 'ui' }; }
+      else if (inCircle(trigBtn, x, y)) { c.fire(); platform.vibrate(true); touches[id] = { role: 'ui' }; }
+      else if (Math.hypot(x - scopeC.x, y - scopeC.y) < D / 2 + 30) touches[id] = { role: 'cpan', x, y };
+      return;
+    }
     if (G.mode !== 'play') return;
     if (inCircle(eyeBtn, x, y)) {
-      touches[id] = { role: 'eye' };
-      G.duel.blink();
+      touches[id] = { role: 'duck' };
+      G.duel.duckDown();
     } else if (inCircle(trigBtn, x, y)) {
       touches[id] = { role: 'trigger' };
       G.duel.triggerDown();
@@ -142,6 +187,11 @@ function onTouch(type, id, sx, sy) {
     }
   } else if (type === 'move') {
     const t = touches[id];
+    if (t && t.role === 'cpan' && G.mode === 'classic') {
+      G.classic.pan(x - t.x, y - t.y);
+      t.x = x;
+      t.y = y;
+    }
     if (t && t.role === 'pan' && G.mode === 'play') {
       G.duel.pan(x - t.x, y - t.y);
       t.x = x;
@@ -150,6 +200,7 @@ function onTouch(type, id, sx, sy) {
   } else {
     const t = touches[id];
     delete touches[id];
+    if (t && t.role === 'duck' && G.duel) G.duel.duckUp();
     if (t && t.role === 'trigger' && G.mode === 'play') {
       const res = G.duel.triggerUp();
       if (res) {
@@ -164,7 +215,8 @@ function onTouch(type, id, sx, sy) {
 // 点一下跳过过场
 function skipAhead() {
   const m = G.mode;
-  if (m === 'story') setMode('intro');
+  if (m === 'story') setMode(needHowto() ? 'howto' : 'intro');
+  else if (m === 'howto') { G.howtoSeen = true; setMode('intro'); }
   else if (m === 'intro') setMode('play');
   else if (m === 'move') afterMove();
   else if (m === 'clear') afterClear();
@@ -219,10 +271,21 @@ function update(dt) {
   }
   const d = G.duel;
   const m = G.mode;
-  if (m === 'story' && G.modeT > 1.8) setMode('intro');
+  if (m === 'story' && G.modeT > 1.8) setMode(needHowto() ? 'howto' : 'intro');
+  else if (m === 'howto' && G.modeT > 9) { G.howtoSeen = true; setMode('intro'); }
   else if (m === 'intro' && G.modeT > 1.4) setMode('play');
   else if (m === 'play') {
     d.update(dt);
+    while (d.events.length) {
+      const ev = d.events.shift();
+      if (ev.kind === 'helmet') {
+        platform.vibrate(true);
+        G.say = { text: '头盔被打飞！他在那儿！', color: '#ffd23f', t: 1.8 };
+      } else if (ev.kind === 'spotted') G.say2 = { text: '暴露了！快缩头', t: 1.2 };
+    }
+    if (G.say) { G.say.t -= dt; if (G.say.t <= 0) G.say = null; }
+    if (G.say2) { G.say2.t -= dt; if (G.say2.t <= 0) G.say2 = null; }
+    if (d.drawLeft >= 0 && Math.floor(d.t * 6) !== Math.floor((d.t - dt) * 6)) platform.vibrate(false);
     if (d.state === 'hit') setMode('hit');
     else if (d.state === 'dead') {
       platform.vibrate(true);
@@ -234,6 +297,7 @@ function update(dt) {
   } else if (m === 'move' && G.modeT > cut.RELOCATE_SEC) afterMove();
   else if (m === 'clear' && G.modeT > cut.CLEAR_SEC) afterClear();
   else if (m === 'ad' && G.modeT > config.fakeAdSec) setMode('rescue');
+  else if (m === 'classic') G.classic.update(dt);
   else if (m === 'rescue' && G.modeT > cut.RESCUE_SEC) {
     G.rescuesLeft -= 1;
     G.attempt += 1;
@@ -306,8 +370,15 @@ function drawScope(opt) {
   ctx.fillStyle = vg;
   ctx.fillRect(scopeC.x - D / 2, scopeC.y - D / 2, D, D);
 
+  // 他开枪的火光（打飞了你的诱饵头盔）：把他自己照出来
+  if (d.flashSec > 0) {
+    const h = scene.enemyHead(d.sc, 1);
+    const k = Math.min(1, d.flashSec / 1.6);
+    starburst(ctx, scopeC.x + h.x - cam.x, scopeC.y + h.y - cam.y, 26 * k + 6, 12 * k + 4, 9, '#ffe14f');
+  }
+
   // 他正在瞄你：镜子边缘一圈红光一闪一闪
-  if (d.drawLeft >= 0 && d.state === 'play') {
+  if (d.drawLeft >= 0 && d.state === 'play' && d.exposed()) {
     const a = 0.3 + 0.2 * Math.sin(d.t * 20);
     const rg = ctx.createRadialGradient(scopeC.x, scopeC.y, D * 0.4, scopeC.x, scopeC.y, D / 2);
     rg.addColorStop(0, 'rgba(255,0,40,0)');
@@ -318,20 +389,32 @@ function drawScope(opt) {
 
   if (!opt.noCross) drawCrosshair(ctx, scopeC.x + d.sway.x, scopeC.y + d.sway.y, d.steadiness());
 
-  if (d.blinkMs >= 0) {
-    const half = d.dcfg.blinkMs / 2;
-    const k = d.blinkMs < half ? d.blinkMs / half : 1 - (d.blinkMs - half) / half;
-    const lid = (D / 2) * clamp(k * 1.15, 0, 1);
-    ctx.fillStyle = '#0a0612';
-    ctx.fillRect(scopeC.x - D / 2, scopeC.y - D / 2, D, lid);
-    ctx.fillRect(scopeC.x - D / 2, scopeC.y + D / 2 - lid, D, lid);
-  }
+  // 缩头：掩体（沙袋墙）从下往上盖住镜子
+  if (d.duck > 0) drawCover(ctx, d.duck);
   if (opt.tint) {
     ctx.fillStyle = opt.tint;
     ctx.fillRect(scopeC.x - D / 2, scopeC.y - D / 2, D, D);
   }
   ctx.restore();
   scopeRing(ctx, scopeC.x, scopeC.y, D);
+}
+
+function drawCover(ctx, k) {
+  const top = scopeC.y + D / 2 - (D + 20) * clamp(k * 1.1, 0, 1);
+  ctx.fillStyle = '#3a2e2a';
+  ctx.fillRect(scopeC.x - D / 2, top, D, D + 40);
+  ctx.strokeStyle = '#1b1530';
+  ctx.lineWidth = 3;
+  for (let row = 0; row < 8; row++) {
+    const y = top + 10 + row * 44;
+    for (let i = -1; i < 6; i++) {
+      const x = scopeC.x - D / 2 + i * 76 + (row % 2) * 38;
+      ctx.fillStyle = row % 2 ? '#8a7350' : '#9c8460';
+      roundRect(ctx, x, y, 72, 40, 14);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
 }
 
 function scopeRing(ctx, x, y, d) {
@@ -370,22 +453,6 @@ function drawCrosshair(ctx, x, y, steadiness) {
   ctx.beginPath();
   ctx.arc(x, y, 1.6, 0, Math.PI * 2);
   ctx.fill();
-}
-
-function drawEyeIcon(ctx, x, y, s, closed) {
-  ctx.strokeStyle = '#f4f1de';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(x - s, y);
-  ctx.quadraticCurveTo(x, y - (closed ? 2 : s * 0.9), x + s, y);
-  ctx.quadraticCurveTo(x, y + s * 0.9, x - s, y);
-  ctx.stroke();
-  if (!closed) {
-    ctx.fillStyle = '#f4f1de';
-    ctx.beginPath();
-    ctx.arc(x, y, s * 0.32, 0, Math.PI * 2);
-    ctx.fill();
-  }
 }
 
 function pulse(ctx, b) {
@@ -431,62 +498,45 @@ function drawHud() {
     cut.cardIcon(ctx, c.icon, cx, 43, 0.42);
   });
 
-  // 正中上方：对面的镜片，越红越快找到你
-  const mx = L.W / 2;
-  const my = 40;
-  ctx.beginPath();
-  ctx.arc(mx, my, 15, 0, Math.PI * 2);
-  ctx.fillStyle = '#2b2438';
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(mx, my);
-  ctx.arc(mx, my, 15, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * d.progress);
-  ctx.closePath();
-  const danger = d.progress >= config.glintAt || d.locked;
-  ctx.fillStyle = danger && Math.sin(G.modeT * 12) > 0 ? '#ff4d5e' : '#c2263a';
-  ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = '#6d6380';
-  ctx.beginPath();
-  ctx.arc(mx, my, 15, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,0.8)';
-  ctx.beginPath();
-  ctx.arc(mx - 5, my - 5, 3, 0, Math.PI * 2);
-  ctx.fill();
-  if (d.locked) comicText(ctx, d.drawLeft >= 0 ? '他要开枪！' : '他找到你了', mx, scopeC.y - D / 2 + 34, d.drawLeft >= 0 ? 24 : 16, '#ff4d5e');
-  else if (d.peekCue()) {
-    // 观察手（或耳机卡）报点
-    const k = Math.min(1, G.modeT * 8);
-    roundRect(ctx, mx - 74, scopeC.y - D / 2 + 16, 148, 30, 15);
-    ctx.fillStyle = '#2e86ab';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = INK;
-    ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '900 15px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('🎧 要出来了！', mx, scopeC.y - D / 2 + 31 + (1 - k) * 4);
+  // 观察手（或耳机卡）：他探头时，在镜子边上指他的方向
+  if (d.mods.peekCue && d.searching() && d.drawLeft < 0) {
+    const h = scene.enemyHead(d.sc, 1);
+    const dx = h.x - d.cam.x;
+    const dy = h.y - d.cam.y;
+    if (Math.hypot(dx, dy) > D * 0.3) {
+      const a = Math.atan2(dy, dx);
+      const ax = scopeC.x + Math.cos(a) * (D / 2 - 18);
+      const ay = scopeC.y + Math.sin(a) * (D / 2 - 18);
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(a);
+      ctx.fillStyle = '#3ef0ff';
+      ctx.beginPath();
+      ctx.moveTo(12, 0);
+      ctx.lineTo(-8, -10);
+      ctx.lineTo(-8, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = INK;
+      ctx.stroke();
+      ctx.restore();
+    }
   }
+  if (d.drawLeft >= 0) {
+    comicText(ctx, d.exposed() ? '他瞄准你了！' : '他盯着你的窗口', scopeC.x, scopeC.y - D / 2 + 30, d.exposed() ? 26 : 18, '#ff4d5e');
+  }
+  drawPanel(ctx, d);
 
-  // 左下：眨眼按钮，外圈是眼睛酸度
+  // 左下：缩头按钮。点一下 = 缩一下再起来（画面会变）；按住 = 一直缩着
   ctx.beginPath();
   ctx.arc(eyeBtn.x, eyeBtn.y, eyeBtn.r, 0, Math.PI * 2);
-  ctx.fillStyle = '#3a3150';
+  ctx.fillStyle = d.duck > 0.5 ? '#6b5a3a' : '#3a3150';
   ctx.fill();
-  const sore = d.eyeOpenSec / config.eye.openMaxSec;
-  ctx.lineWidth = 6;
-  ctx.strokeStyle = '#2b2438';
-  ctx.beginPath();
-  ctx.arc(eyeBtn.x, eyeBtn.y, eyeBtn.r - 3, 0, Math.PI * 2);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = INK;
   ctx.stroke();
-  ctx.strokeStyle = sore > 0.75 ? '#ff4d5e' : '#f9c74f';
-  ctx.beginPath();
-  ctx.arc(eyeBtn.x, eyeBtn.y, eyeBtn.r - 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * sore);
-  ctx.stroke();
-  drawEyeIcon(ctx, eyeBtn.x, eyeBtn.y, 17, d.blinkMs >= 0);
-
+  drawDuckIcon(ctx, eyeBtn.x, eyeBtn.y, d.duck);
   // 右下：扳机。按住屏息，松手开枪
   const st = d.steadiness();
   ctx.beginPath();
@@ -509,15 +559,96 @@ function drawHud() {
   drawHeart(ctx, trigBtn.x - trigBtn.r - 6, trigBtn.y - trigBtn.r + 2, 9 + beat * 3);
 
   if (G.matchNo === 1 && G.duelIndex === 0 && G.mode === 'play') {
-    if (d.blinks < 2) pulse(ctx, eyeBtn);
+    if (d.blinks < 3) pulse(ctx, eyeBtn);
     else if (d.shots === 0 && !d.holding) pulse(ctx, trigBtn);
   }
 
   if (G.missFlash > 0 && G.lastShot) {
-    const words = { covered: '他缩着！', close: '差一点！', miss: '偏了！' };
+    const words = { covered: '他缩着！', close: '差一点！', miss: '偏了！', decoy: '是假人！' };
     comicText(ctx, words[G.lastShot.kind] || '偏了！', scopeC.x, scopeC.y + D / 2 - 44, 28, G.lastShot.kind === 'close' ? '#ffd23f' : '#ff4d5e');
-    if (!d.locked) comicText(ctx, '位置暴露', scopeC.x, scopeC.y + D / 2 - 16, 15, '#f4f1de');
+    if (!d.mods.silent) comicText(ctx, '枪口火光：他看见你了', scopeC.x, scopeC.y + D / 2 - 16, 14, '#f4f1de');
   }
+  if (G.say && G.mode === 'play') comicText(ctx, G.say.text, scopeC.x, scopeC.y + 40, 22, G.say.color);
+  if (G.say2 && G.mode === 'play' && !G.missFlash) comicText(ctx, G.say2.text, scopeC.x, scopeC.y + D / 2 - 30, 18, '#ff4d5e');
+}
+
+// 你这栋楼（从他那边看过来）：一格一扇窗，黄框是你。红圈 = 他的镜子正在看哪
+function drawPanel(ctx, d) {
+  const p = panelR;
+  const cw = (p.w - 20) / d.COLS;
+  const ch = (p.h - 22) / d.ROWS;
+  const cx = (c) => p.x + 10 + cw * (c + 0.5);
+  const cy = (r) => p.y + 16 + ch * (r + 0.5);
+  const aiming = d.drawLeft >= 0;
+  roundRect(ctx, p.x, p.y, p.w, p.h, 8);
+  ctx.fillStyle = aiming && Math.sin(d.t * 18) > 0 ? '#5a1a2a' : '#2b2438';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.fillStyle = '#c9c2e0';
+  ctx.font = '700 10px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const label = aiming ? '他瞄着你！' : d.searching() ? '你这栋楼 · 他在找你' : '你这栋楼 · 他缩着，没在看';
+  ctx.fillText(label, p.x + 10, p.y + 9);
+  // 窗户
+  for (let r = 0; r < d.ROWS; r++) {
+    for (let c = 0; c < d.COLS; c++) {
+      const me = c === d.me.c && r === d.me.r;
+      ctx.fillStyle = me ? (d.exposed() ? '#ffd23f' : '#8a7350') : '#1a1428';
+      ctx.fillRect(cx(c) - cw * 0.28, cy(r) - ch * 0.32, cw * 0.56, ch * 0.64);
+      if (me && d.exposed()) {
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.arc(cx(c), cy(r) - 2, Math.min(5, ch * 0.18), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+  // 锁定圈：转满他就瞄准你
+  if (d.lock > 0) {
+    ctx.strokeStyle = '#ff4d5e';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx(d.me.c), cy(d.me.r), Math.min(cw, ch) * 0.62, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * d.lock);
+    ctx.stroke();
+  }
+  // 他的镜子
+  const sx = cx(d.seek.x);
+  const sy = cy(d.seek.y);
+  const rr = Math.min(cw, ch) * 0.75;
+  if (d.searching() || aiming) {
+    ctx.strokeStyle = '#ff4d5e';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(sx, sy, rr, 0, Math.PI * 2);
+    ctx.moveTo(sx - rr - 4, sy);
+    ctx.lineTo(sx + rr + 4, sy);
+    ctx.moveTo(sx, sy - rr - 4);
+    ctx.lineTo(sx, sy + rr + 4);
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = 'rgba(200,190,220,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(sx, sy, rr, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawDuckIcon(ctx, x, y, k) {
+  // 一个小人头 + 一道墙：缩下去时头躲到墙后
+  ctx.fillStyle = '#f4f1de';
+  ctx.beginPath();
+  ctx.arc(x, y - 6 + k * 12, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#9c8460';
+  roundRect(ctx, x - 20, y + 2, 40, 14, 5);
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
 }
 
 function drawCrossIcon(ctx, x, y, s) {
@@ -682,16 +813,66 @@ function drawTitle() {
   ctx.restore();
   scopeRing(ctx, tc.x, tc.y, d);
   cut.logo(ctx, L, t);
-  text('眨眼找人 · 屏息开枪', L.W / 2, L.H * 0.14 + 92, 14, '#f4f1de', 'center', 700);
+  text('缩头找人 · 屏息开枪 · 谁先暴露谁死', L.W / 2, L.H * 0.14 + 92, 13, '#f4f1de', 'center', 700);
 
   const S = team.state();
   const by = Math.min(L.H - 150, tc.y + d / 2 + 30);
   button('start', S.cups ? '再打一次网吧赛' : '开始比赛', L.W / 2 - 110, by, 220, 58, startRun, true);
-  button('team', S.revealed ? '战队' : '🔒 战队', L.W / 2 - 80, by + 74, 160, 44, () => {
+  button('team', S.revealed ? '战队' : '🔒 战队', L.W / 2 - 160, by + 74, 150, 44, () => {
     if (S.revealed) setMode('team');
     else toast('赢下第一次网吧赛就知道了');
   });
+  button('classic', '原作玩法样机', L.W / 2 + 10, by + 74, 150, 44, startClassic);
   if (S.money) text('奖金 ¥' + S.money, L.W / 2, by + 136, 13, '#ffd23f', 'center', 800);
+}
+
+// —— 原作玩法样机 ——
+function drawClassic() {
+  const ctx = P.ctx;
+  const c = G.classic;
+  c.draw(ctx, scopeC.x, scopeC.y, G.t);
+  if (!c.wide) scopeRing(ctx, scopeC.x, scopeC.y, D);
+  // 上方：血、时间、还剩几个
+  for (let i = 0; i < classic.HP; i++) drawHeart(ctx, 22 + i * 24, 30, i < c.hp ? 9 : 5);
+  comicText(ctx, String(Math.ceil(c.left)), L.W / 2, 32, 26, c.left < 10 ? '#ff4d5e' : '#f4f1de');
+  const alive = c.enemies.filter((e) => !e.dead).length;
+  text('还剩 ' + alive + ' 个', L.W - 16, 30, 14, '#f4f1de', 'right', 800);
+  if (G.modeT < 4 && c.state === 'play') text(c.wide ? '先用望远镜找人，左下切狙击镜开枪' : '左下切回望远镜', L.W / 2, scopeC.y + D / 2 + 26, 13, '#ffd23f', 'center', 800);
+  if (c.say) comicText(ctx, c.say.text, L.W / 2, scopeC.y + D / 2 - 30, 22, '#ffd23f');
+  // 左下：望远镜 / 狙击镜；右下：开枪（点一下就开）
+  [[eyeBtn, c.wide ? '望远镜' : '狙击镜', '#3a3150'], [trigBtn, '开枪', c.wide ? '#2b2438' : '#c2263a']].forEach(([b, label, fill]) => {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    text(label, b.x, b.y, 15, '#f4f1de', 'center', 900);
+  });
+  text('点左边切换', eyeBtn.x, eyeBtn.y + eyeBtn.r + 14, 10, '#9a90b0');
+  if (c.state !== 'play') {
+    ctx.fillStyle = 'rgba(10,6,18,0.86)';
+    ctx.fillRect(0, 0, L.W, L.H);
+    comicText(ctx, c.state === 'win' ? '全清！' : '被打死了', L.W / 2, 90, 40);
+    const lines = [
+      ['它好玩在：比谁先找到谁', '#ffd23f', 900],
+      ['望远镜看得宽、不能开枪；狙击镜能开枪、看得窄', '#f4f1de', 600],
+      ['→ 切过去那一下，赌自己找对了', '#c9c2e0', 600],
+      ['他探头就在瞄你，镜片一亮 = 快开枪了', '#f4f1de', 600],
+      ['→ 你和他在比手快', '#c9c2e0', 600],
+      ['打空一枪，他们全知道你在哪', '#f4f1de', 600],
+      ['→ 每一枪都要有把握', '#c9c2e0', 600],
+      ['', '#fff', 600],
+      ['它的毛病', '#ff4d5e', 900],
+      ['电脑对手像打靶：只比手快，不比脑子', '#f4f1de', 600],
+      ['他找你的过程看不见：紧张只靠倒计时', '#f4f1de', 600],
+      ['真正好玩的是网上 1 对 1：对面是真人', '#f4f1de', 600],
+    ];
+    lines.forEach(([str, col, w], i) => text(str, L.W / 2, 150 + i * 28, 13, col, 'center', w));
+    button('classicAgain', '再来一局', L.W / 2 - 160, L.H - 110, 150, 50, startClassic, true);
+    button('classicHome', '回主页', L.W / 2 + 10, L.H - 110, 150, 50, goTitle);
+  }
 }
 
 // —— 选卡：三选一 ——
@@ -814,6 +995,7 @@ function render() {
   const m = G.mode;
 
   if (m === 'title') drawTitle();
+  else if (m === 'classic') drawClassic();
   else if (m === 'team') drawTeam();
   else if (m === 'pick') drawPick();
   else if (m === 'reveal') drawReveal(false);
@@ -828,7 +1010,8 @@ function render() {
   else if (m === 'fail') drawFail();
   else drawScope({ tint: m === 'dead' ? 'rgba(120,20,30,0.45)' : null });
 
-  if (m === 'play' || m === 'hit' || m === 'intro' || m === 'story') drawHud();
+  if (m === 'play' || m === 'hit' || m === 'intro' || m === 'story' || m === 'howto') drawHud();
+  if (m === 'howto') drawHowto();
 
   if (m === 'story') {
     const mt = match();
@@ -877,5 +1060,5 @@ function frame() {
 goTitle();
 startMatch(); // 先把第一场备好（开场背后不画它），点「开始比赛」再从头开
 setMode('title');
-platform.exposeForTest('__vasily', { _sd: startDuel, G, config, scene, team, cut, scopeC, D, eyeBtn, trigBtn, scale, setMode, startRun, startMatch, afterClear });
+platform.exposeForTest('__vasily', { _sd: startDuel, startClassic, G, config, scene, team, cut, scopeC, D, eyeBtn, trigBtn, scale, setMode, startRun, startMatch, afterClear });
 platform.nextFrame(frame);

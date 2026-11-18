@@ -695,6 +695,10 @@ function cardIcon(ctx, icon, x, y, s) {
     ctx.quadraticCurveTo(-16, -18, 18, -16);
     ctx.quadraticCurveTo(16, 16, -18, 14);
     ctx.fillStyle = '#90be6d';
+  } else if (icon === 'helmet') {
+    ctx.arc(0, 4, 18, Math.PI, 0);
+    ctx.rect(-22, 4, 44, 5);
+    ctx.fillStyle = '#6b7f4a';
   } else if (icon === 'charm') {
     ctx.rect(-12, -16, 24, 32);
     ctx.fillStyle = '#ffd23f';

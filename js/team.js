@@ -16,14 +16,14 @@ const TEAMMATES = [
   { id: 'cap', name: '老K', role: '指挥', buff: '稳得快', look: { hair: '#2b2438', jacket: '#e63946', skin: '#e9b48a', style: 'short' },
     desc: (lv) => '屏息稳下来快 ' + lv * 8 + '%', mods: (lv) => ({ settleMul: 1 - 0.08 * lv }) },
   { id: 'spot', name: '小雨', role: '观察手', buff: '报点', female: true, look: { hair: '#1f6f78', jacket: '#2e86ab', skin: '#f1c6a8', style: 'ponytail' },
-    desc: (lv) => '他探头前耳机里喊你' + (lv >= 3 ? '·每场多拉一次' : '·3级多拉一次'),
+    desc: (lv) => '他探头时给你指方向' + (lv >= 3 ? '·每场多拉一次' : '·3级多拉一次'),
     mods: (lv) => ({ peekCue: lv >= 1, rescueAdd: lv >= 3 ? 1 : 0 }) },
   { id: 'entry', name: '阿豆', role: '突破手', buff: '冷静', look: { hair: '#6b3e26', jacket: '#f4a261', skin: '#d99a6c', style: 'buzz' },
     desc: (lv) => '心跳慢 ' + lv * 12 + '%', mods: (lv) => ({ heartMul: 1 - 0.12 * lv }) },
   { id: 'free', name: '铁头', role: '自由人', buff: '快枪', look: { hair: '#f4f1de', jacket: '#2a9d8f', skin: '#e9b48a', style: 'spiky' },
     desc: (lv) => '对枪多 ' + (lv * 0.1).toFixed(1) + ' 秒', mods: (lv) => ({ quickDrawAdd: 0.1 * lv }) },
   { id: 'sub', name: '小新', role: '替补', buff: '藏得好', look: { hair: '#c77dff', jacket: '#6a4c93', skin: '#f1c6a8', style: 'cap' },
-    desc: (lv) => '对面找你慢 ' + lv * 6 + '%', mods: (lv) => ({ enemyRateMul: 1 - 0.06 * lv, blinkCostMul: 1 - 0.08 * lv }) },
+    desc: (lv) => '他找你慢 ' + lv * 6 + '%', mods: (lv) => ({ enemyRateMul: 1 - 0.06 * lv }) },
 ];
 
 // 训练基地：越好，奖金拿得越多
@@ -37,16 +37,17 @@ const BASES = [
 const CARDS = [
   { id: 'breath', name: '深呼吸', desc: '稳住多撑 1 秒', icon: 'lung', mods: { holdMaxAdd: 1 } },
   { id: 'scope', name: '好镜子', desc: '判定圈大一圈', icon: 'scope', mods: { hitRadiusAdd: 3 } },
-  { id: 'ear', name: '耳机', desc: '他探头前有提示', icon: 'ear', mods: { peekCue: true } },
+  { id: 'ear', name: '耳机', desc: '他探头时指方向', icon: 'ear', mods: { peekCue: true } },
   { id: 'gum', name: '口香糖', desc: '心跳慢一半', icon: 'heart', mods: { heartMul: 0.5 } },
-  { id: 'mag', name: '快速换弹', desc: '换弹快一半', icon: 'bullet', mods: { reloadMul: 0.5 } },
+  { id: 'silencer', name: '消音器', desc: '打空不暴露', icon: 'bullet', mods: { silent: true } },
+  { id: 'helmet', name: '诱饵头盔', desc: '替你挨一枪，照出他', icon: 'helmet', mods: { helmets: 1 } },
   { id: 'ghillie', name: '伪装网', desc: '他找你慢三成', icon: 'leaf', mods: { enemyRateMul: 0.7 } },
   { id: 'charm', name: '护身符', desc: '每场多拉一次', icon: 'charm', mods: { rescueAdd: 1 } },
   { id: 'hand', name: '快手', desc: '对枪多 0.3 秒', icon: 'hand', mods: { quickDrawAdd: 0.3 } },
 ];
 
-const ADD = ['hitRadiusAdd', 'holdMaxAdd', 'quickDrawAdd', 'rescueAdd'];
-const MUL = ['settleMul', 'heartMul', 'enemyRateMul', 'blinkCostMul', 'reloadMul'];
+const ADD = ['hitRadiusAdd', 'holdMaxAdd', 'quickDrawAdd', 'rescueAdd', 'helmets'];
+const MUL = ['settleMul', 'heartMul', 'enemyRateMul', 'reloadMul'];
 
 function fresh() {
   const team = {};
@@ -66,11 +67,12 @@ function reset() {
 }
 
 function combine(list) {
-  const out = { hitRadiusAdd: 0, holdMaxAdd: 0, quickDrawAdd: 0, rescueAdd: 0, settleMul: 1, heartMul: 1, enemyRateMul: 1, blinkCostMul: 1, reloadMul: 1, peekCue: false };
+  const out = { hitRadiusAdd: 0, holdMaxAdd: 0, quickDrawAdd: 0, rescueAdd: 0, helmets: 0, settleMul: 1, heartMul: 1, enemyRateMul: 1, reloadMul: 1, peekCue: false, silent: false };
   list.forEach((m) => {
     ADD.forEach((k) => m[k] && (out[k] += m[k]));
     MUL.forEach((k) => m[k] !== undefined && (out[k] *= m[k]));
     if (m.peekCue) out.peekCue = true;
+    if (m.silent) out.silent = true;
   });
   return out;
 }
