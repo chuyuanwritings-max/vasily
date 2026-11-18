@@ -20,7 +20,7 @@ const HIT_R = 8;
 
 function createClassic(seed, D, config) {
   const r = rng(seed);
-  const sc = scene.build(seed, config.duels[0], D, 'oldtown');
+  const sc = scene.build(seed, { poseShift: 3, contrast: 0.2 }, D, 'oldtown');
   // 场景自带的那个敌人藏到画外，我们自己摆三个
   sc.enemy.win = { x: -999, y: -999, w: 16, h: 22 };
   const spots = sc.spots.slice();

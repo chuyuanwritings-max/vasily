@@ -1,4 +1,4 @@
-// 测试机器人：在手机大小的浏览器里把一次网吧赛从开场点到战队页。用法：node test/robot.js
+// 测试机器人：在手机大小的浏览器里把第一章从开场点到 Boss 和战队页。用法：node test/robot.js
 const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs');
@@ -27,209 +27,237 @@ const fs = require('fs');
     await page.waitForTimeout(120);
   };
   const mode = () => g(() => __vasily.G.mode);
+  const tap = async () => { await page.mouse.click(195, 300); await page.waitForTimeout(150); };
+  // 直接让这一枪打中他（他探着头、准星正对他的头、屏息稳住）
+  const shootSniper = () => g(() => {
+    const V = __vasily; const d = V.G.duel;
+    d.enemy.mode = 'peek'; d.enemy.timer = 9; d.sc.enemy.lift = 1; d.relocating = false;
+    const h = V.scene.enemyHead(d.sc, 1);
+    d.cam.x = h.x; d.cam.y = h.y; d.sway.x = 0; d.sway.y = 0; d.duck = 0; d.moving = 0;
+    d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1;
+    return d.triggerUp();
+  });
+  // 打开某一关一直到能开枪
+  const enterLevel = async (i) => {
+    await g((k) => { const V = __vasily; V.openLevel(V.LV.LEVELS[k]); }, i);
+    await page.waitForTimeout(100);
+    await clickBtn('go');
+    await page.waitForTimeout(700);
+    if ((await mode()) === 'bossIntro') { await tap(); await page.waitForTimeout(700); }
+    await tap(); await page.waitForTimeout(350);
+    await tap(); await page.waitForTimeout(200);
+  };
 
-  // —— 开场 ——
+  // —— 开场 → 地图 ——
   await snap('01_开场');
   check((await mode()) === 'title', '打开先是开场界面');
-  await clickBtn('team');
-  check((await g(() => __vasily.G.toast && __vasily.G.toast.text)) === '赢下第一次网吧赛就知道了', '战队还锁着：点了只给一句悬念');
   await clickBtn('start');
-  check((await mode()) === 'story', '点「开始比赛」进第一场');
-  await page.waitForTimeout(400);
-  await snap('02_第一场');
-  await page.mouse.click(195, 300); await page.waitForTimeout(3200);
-  check((await mode()) === 'howto', '第一次打：先讲一遍怎么玩');
-  await snap('02b_怎么玩');
-  await page.mouse.click(195, 300); await page.waitForTimeout(400);
-  await snap('03_对手登场');
-  await page.mouse.click(195, 300); await page.waitForTimeout(300);
-  check((await mode()) === 'play', '点一下就跳过「第几场」、怎么玩和对手卡');
+  check((await mode()) === 'map', '点「开始比赛」进第一章地图');
+  await snap('02_地图');
+  await clickBtn('lv_c2');
+  check((await g(() => __vasily.G.toast && __vasily.G.toast.text)) === '先过前一关', '第二关锁着：先过前一关');
 
-  // 缩头：点一下 = 缩到底再起来，画面变（= 眨眼找茬）
+  // —— 第一关 ——
+  await clickBtn('lv_c1');
+  check((await mode()) === 'loadout', '点第一关：看目标、带一张卡');
+  check((await g(() => __vasily.team.unlockedCards().length)) === 2, '一开始有两张卡可带');
+  await snap('03_带卡');
+  await clickBtn('go');
+  await page.waitForTimeout(900);
+  check((await mode()) === 'teach', '开打前有一页讲这关的新东西');
+  await snap('04_说明');
+  await tap(); await page.waitForTimeout(400);
+  await snap('05_回合卡');
+  await tap(); await page.waitForTimeout(200);
+  check((await mode()) === 'play', '点两下进对狙');
+  check((await g(() => __vasily.G.duel.sc.figures.length)) === 2, '第一关对面两个人影，只有一个是狙击手');
+
+  // 缩头 = 眨眼
   const pose0 = await g(() => __vasily.G.duel.sc.enemy.pose);
   await page.mouse.click(...at(btn.eye));
-  await page.waitForTimeout(120);
-  await snap('04a_缩头');
-  await page.waitForTimeout(400);
-  check((await g(() => __vasily.G.duel.blinks)) === 1, '点一下缩头只算一次');
-  check((await g(() => __vasily.G.duel.sc.enemy.pose)) !== pose0, '缩头起来以后，对面狙击手挪了');
-  check(await g(() => __vasily.G.duel.exposed()), '松手就探出头来');
-  // 缩着头不能开枪
+  await page.waitForTimeout(450);
+  check((await g(() => __vasily.G.duel.sc.enemy.pose)) !== pose0, '缩一下头再起来，他挪了一点');
   await page.mouse.move(...at(btn.eye)); await page.mouse.down(); await page.waitForTimeout(300);
   await g(() => __vasily.G.duel.triggerDown());
-  check(!(await g(() => __vasily.G.duel.holding)), '缩着头不能屏息开枪');
-  await page.mouse.up(); await page.waitForTimeout(300);
-  const cam0 = await g(() => ({ ...__vasily.G.duel.cam }));
-  await page.mouse.move(195, 250); await page.mouse.down(); await page.mouse.move(120, 300, { steps: 5 }); await page.mouse.up();
-  const cam1 = await g(() => ({ ...__vasily.G.duel.cam }));
-  check(cam1.x !== cam0.x || cam1.y !== cam0.y, '手指拖动能移镜头');
-  await snap('04_对狙');
-
-  // 他的红圈：停在你窗口、你露着头 → 锁定圈转满 → 他瞄准你；缩头 → 倒计时停住
-  await g(() => { const d = __vasily.G.duel; d.enemy.mode = 'peek'; d.enemy.timer = 9; d.seek.x = d.seek.tx = d.me.c; d.seek.y = d.seek.ty = d.me.r; d.seek.dwell = 9; });
-  await page.waitForTimeout(250);
-  check((await g(() => __vasily.G.duel.lock)) > 0.1, '红圈停在你窗口上、你露着头：锁定圈在转');
-  await page.waitForFunction(() => __vasily.G.duel.drawLeft >= 0, null, { timeout: 3000 });
-  check(await g(() => __vasily.G.duel.glint()), '锁定圈满了：他瞄准你，镜片反光');
-  await snap('04b_他瞄准你');
-  await page.mouse.move(...at(btn.eye)); await page.mouse.down(); await page.waitForTimeout(400);
-  const w0 = await g(() => ({ dl: __vasily.G.duel.drawLeft, w: __vasily.G.duel.watch, m: __vasily.G.mode }));
-  await page.waitForTimeout(400);
-  const w1 = await g(() => ({ dl: __vasily.G.duel.drawLeft, w: __vasily.G.duel.watch }));
-  check(w0.m === 'play' && w1.dl === w0.dl && w1.w > w0.w, '缩头躲开：他开不了枪，只能盯着你的窗口');
-  await page.waitForFunction(() => __vasily.G.duel.drawLeft < 0, null, { timeout: 4000 });
-  check(true, '一直缩着：他等不到你，放弃，接着找');
+  check(!(await g(() => __vasily.G.duel.holding)), '缩着头不能开枪');
   await page.mouse.up(); await page.waitForTimeout(300);
 
-  // 他缩着时打头：打不中，提示「他缩着」；打空 = 枪口火光，他立刻知道你在哪
-  await page.waitForFunction(() => { const d = __vasily.G.duel; return d.enemy.mode === 'hide' && d.enemy.timer > 1.0 && d.reloadSec <= 0 && d.recoverSec <= 0; }, null, { timeout: 15000 });
-  await g(() => { __vasily.G.duel.heat = 0; });
-  await page.mouse.move(...at(btn.trig)); await page.mouse.down(); await page.waitForTimeout(650);
-  await g(() => { const d = __vasily.G.duel; const h = __vasily.scene.enemyHead(d.sc, 1); d.cam.x = h.x - d.sway.x; d.cam.y = h.y - d.sway.y; });
-  await page.mouse.up(); await page.waitForTimeout(80);
-  const cov = await g(() => { const d = __vasily.G.duel; return { kind: d.impacts.at(-1).kind, m: __vasily.G.mode, heat: d.heat, onMe: d.onMe() }; });
-  check(cov.m === 'play' && cov.kind === 'covered', '他缩着时打头：打不中，提示「他缩着」');
-  check(cov.heat === 1 && cov.onMe, '打空一枪：他的红圈直接跳到你窗口上');
-  await page.mouse.click(...at(btn.eye)); await page.waitForTimeout(500);
-
-  // 他探头时屏息、松手 → 爆头 → 换点位 → 下一个对手（不同背景）
-  async function winDuel(n, label) {
-    await g(() => { const d = __vasily.G.duel; d.heat = 0; d.lock = 0; d.drawLeft = -1; d.watch = 0; d.seekSpeed = 0; d.seek.x = d.seek.tx = (d.me.c + 3) % 6; });
-    await page.waitForFunction(() => { const d = __vasily.G.duel; return d.reloadSec <= 0 && d.recoverSec <= 0 && d.exposed() && d.enemy.mode === 'rise'; }, null, { timeout: 15000, polling: 16 });
-    await page.mouse.move(...at(btn.trig)); await page.mouse.down();
-    await page.waitForTimeout(700);
-    const st = await g(() => ({ s: __vasily.G.duel.steadiness(), e: __vasily.G.duel.enemyExposed() }));
-    check(st.s === 'steady' && st.e, label + '：他探头后按住 0.7 秒，准星已经最稳');
-    await g(() => { const d = __vasily.G.duel; const h = __vasily.scene.enemyHead(d.sc, 1); d.cam.x = h.x - d.sway.x; d.cam.y = h.y - d.sway.y; });
-    await page.mouse.up();
-    await page.waitForTimeout(80);
-    check((await mode()) === 'hit', label + '：松手爆头');
-  }
-  const themesSeen = [];
-  for (let n = 1; n <= 3; n++) {
-    themesSeen.push(await g(() => __vasily.G.duel.sc.theme.name));
-    await winDuel(n, '第一场对手 ' + n);
-    if (n === 1) { await page.waitForTimeout(700); await snap('05_爆头'); }
-    if (n < 3) {
-      await page.waitForFunction(() => __vasily.G.mode === 'move', null, { timeout: 3000 });
-      await page.waitForTimeout(900);
-      if (n === 1) await snap('06_换点位');
-      check(true, '打死一个：跑去下一个点位');
-      await page.waitForFunction(() => __vasily.G.mode === 'intro', null, { timeout: 4000 });
-      if (n === 1) { await page.waitForTimeout(300); await snap('07_下一个对手'); }
-      await page.waitForFunction(() => __vasily.G.mode === 'play', null, { timeout: 3000 });
-    }
-  }
-  check(new Set(themesSeen).size === 3, '三个对手三张背景：' + themesSeen.join('、'));
-  await page.waitForFunction(() => __vasily.G.mode === 'clear', null, { timeout: 3000 });
-  await page.waitForTimeout(1500);
-  await snap('08_这场拿下');
-  check((await g(() => __vasily.team.state().money)) > 0, '打一场有奖金');
-  await page.waitForFunction(() => __vasily.G.mode === 'pick', null, { timeout: 3000 });
-  await page.waitForTimeout(700);
-  await snap('09_选卡');
-  const card0 = await g(() => __vasily.G.offer[0].id);
-  await clickBtn('card0');
-  const after = await g(() => ({ m: __vasily.G.mode, n: __vasily.G.matchNo, c: __vasily.G.cards.slice() }));
-  check(after.m === 'story' && after.n === 2 && after.c[0] === card0, '选一张卡，进第二场');
-
-  // —— 第二场：被打死 → 女队友拉起来 → 再死 → 重打这一场（卡还在）——
-  await g(() => { __vasily.setMode('play'); __vasily.G.rescuesLeft = 1; }); // 选到护身符卡也按一次算
-  const forceLock = () => g(() => { const d = __vasily.G.duel; d.helmets = 0; d.enemy.mode = 'peek'; d.enemy.timer = 9; d.seek.x = d.seek.tx = d.me.c; d.seek.y = d.seek.ty = d.me.r; d.seek.dwell = 9; d.lock = 0.95; });
-  await forceLock();
-  await page.waitForFunction(() => __vasily.G.duel.drawLeft >= 0, null, { timeout: 3000 });
-  await snap('10_他要开枪');
-  await page.waitForFunction(() => __vasily.G.mode === 'dead', null, { timeout: 3000 });
-  check(true, '他瞄准你时没缩头、也没抢先开枪：出局');
-  await clickBtn('rescue');
-  check((await mode()) === 'ad', '没填广告位时放广告占位');
-  await page.waitForFunction(() => __vasily.G.mode === 'rescue', null, { timeout: 5000 });
-  await page.waitForTimeout(500); await snap('11a_拉人_倒地');
-  await page.waitForTimeout(800); await snap('11b_拉人_握手');
-  await page.waitForTimeout(800); await snap('11c_拉人_起来');
-  await page.waitForFunction(() => __vasily.G.mode === 'play', null, { timeout: 4000 });
-  check((await g(() => __vasily.G.rescuesLeft)) === 0, '拉人动画放完回到对狙，这场拉人次数用掉');
-  await forceLock();
-  await page.waitForFunction(() => __vasily.G.mode === 'fail', null, { timeout: 5000 });
-  await snap('12_差一点');
-  await clickBtn('retry');
-  const re = await g(() => ({ m: __vasily.G.mode, n: __vasily.G.matchNo, i: __vasily.G.duelIndex, c: __vasily.G.cards.length }));
-  check(re.m === 'story' && re.n === 2 && re.i === 0 && re.c === 1, '重打这一场：还是第二场，从第一个对手开始，卡还在');
-
-  // —— 三场打完：网吧揭晓 → 战队 ——
-  await g(() => { const V = __vasily; V.G.matchNo = 3; V.afterClear(); });
-  check((await mode()) === 'reveal' && (await g(() => __vasily.team.state().revealed)), '第一次三场全赢：放网吧揭晓，战队解锁');
-  await page.waitForTimeout(1000); await snap('13a_揭晓_网吧');
-  await page.waitForTimeout(1600); await snap('13b_揭晓_站起来');
-  await page.waitForTimeout(2200); await snap('13c_揭晓_队友');
-  await page.waitForTimeout(3800); await snap('13d_揭晓_职业战队');
-  await clickBtn('toTeam');
-  check((await mode()) === 'team', '揭晓完进战队');
-  await g(() => { __vasily.team.state().money = 500; });
+  // 认出他：红圈靠近你、他探着头时镜片反光
+  const gl = await g(() => { const d = __vasily.G.duel; d.enemy.mode = 'peek'; d.enemy.timer = 9; d.sc.enemy.lift = 1; d.seek.x = d.seek.tx = d.me.c + 1 > 5 ? d.me.c - 1 : d.me.c + 1; d.seek.y = d.seek.ty = d.me.r; d.seek.dwell = 9; let seen = false; for (let i = 0; i < 60; i++) { d.t += 1 / 60; if (d.glint()) seen = true; } return seen; });
+  check(gl, '红圈靠近你时，他的镜片会反光（认人的线索）');
   await page.waitForTimeout(100);
-  await snap('14_战队');
-  const before = await g(() => ({ lv: __vasily.team.state().team.cap, m: __vasily.team.state().money, cost: __vasily.team.trainCost(1) }));
-  await clickBtn('train_cap');
-  const aft = await g(() => ({ lv: __vasily.team.state().team.cap, m: __vasily.team.state().money }));
-  check(aft.lv === before.lv + 1 && aft.m === before.m - before.cost, '花奖金练队友：老K 升到 ' + aft.lv + ' 级');
-  const saved = await g(() => JSON.parse(localStorage.getItem('vasily_save_v1')).team.cap);
-  check(saved === aft.lv, '练级存进存档');
-  const mods = await g(() => __vasily.team.mods([]));
-  check(mods.peekCue && mods.settleMul < 1, '队友加成生效：观察手报点、指挥让你稳得快');
+  await snap('06_镜片反光');
 
-  // 队友报点：他快探头时提示
-  await g(() => { const V = __vasily; V.G.matchNo = 1; V.startMatch(); V.setMode('play'); });
-  await page.waitForFunction(() => __vasily.G.duel.searching(), null, { timeout: 8000, polling: 16 });
-  await g(() => { const d = __vasily.G.duel; d.cam.x = __vasily.D / 2; d.cam.y = __vasily.D / 2; });
-  await page.waitForTimeout(100);
-  await snap('15_队友指方向');
-  check(await g(() => __vasily.G.duel.mods.peekCue), '观察手：他探头时在镜子边上指他的方向');
-
-  // 狡猾型摆假人：打中假人 = 打空；诱饵头盔替你挨一枪，他的火光把自己照出来
-  await g(() => { const V = __vasily; V.G.cards = ['helmet']; V.G.matchNo = 1; V.startMatch(); V.G.duelIndex = 2; V._sd(); V.setMode('play'); });
-  const dk = await g(() => { const d = __vasily.G.duel; if (!d.sc.decoy) return 'none'; d.sc.decoy.lift = 1; d.decoy.mode = 'peek'; d.decoy.timer = 9; const h = __vasily.scene.decoyHead(d.sc); d.cam.x = h.x; d.cam.y = h.y; d.holding = true; d.holdSec = 1; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; return d.triggerUp().kind; });
-  check(dk === 'decoy', '狡猾型摆了假人：打中假人算打空');
-  await forceLock();
-  await g(() => { __vasily.G.duel.helmets = 1; });
-  await page.waitForFunction(() => __vasily.G.duel.flashSec > 0, null, { timeout: 4000 });
-  check((await mode()) === 'play', '诱饵头盔替你挨了一枪，你还活着');
-  await page.waitForTimeout(150);
-  await snap('16_头盔被打飞');
-  check(await g(() => __vasily.G.duel.enemyExposed() && __vasily.G.duel.glint()), '他开枪的火光把自己照出来了');
-
-  // 原作玩法样机：望远镜不能开枪，狙击镜打死三个就赢
-  await g(() => __vasily.startClassic());
-  await page.waitForTimeout(300);
-  await snap('17a_样机_望远镜');
-  await page.mouse.click(...at(btn.trig));
-  check((await g(() => __vasily.G.classic.shots)) === 0, '样机：望远镜状态下不能开枪');
-  await page.mouse.click(...at(btn.eye));
-  check(!(await g(() => __vasily.G.classic.wide)), '样机：左下切到狙击镜');
-  for (let i = 0; i < 3; i++) {
-    await g((k) => { const c = __vasily.G.classic; const e = c.enemies[k]; e.mode = 'peek'; e.timer = 9; e.lift = 1; const h = c.head(e); c.cam.x = h.x; c.cam.y = h.y; }, i);
-    if (i === 0) await snap('17b_样机_狙击镜');
-    await page.mouse.click(...at(btn.trig));
-    await page.waitForTimeout(50);
-  }
-  check((await g(() => __vasily.G.classic.state)) === 'win', '样机：三个都打死就赢');
-  await page.waitForTimeout(100);
-  await snap('17c_样机_好玩在哪');
-
-  // 公平：九张背景、几百个随机局，每个藏身点都能挪到镜子正中
-  const fair = await g(() => {
-    const { scene, config, D } = __vasily;
-    const ids = ['oldtown', 'market', 'tanks', 'port', 'station', 'factory', 'neon', 'desert', 'eaves'];
-    let bad = 0, empty = 0;
-    for (let s = 1; s <= 300; s++) {
-      const sc = scene.build(s * 7, config.duels[2], D, ids[s % 9]);
-      if (config.duels[2].decoy && !sc.decoy) empty++;
-      if (!sc.spots.length) { empty++; continue; }
-      const h = scene.enemyHead(sc, 1);
-      if (h.x < D / 2 - 6 || h.x > sc.w - D / 2 + 6 || h.y < D / 2 || h.y > sc.h - D / 2) bad++;
-    }
-    return { bad, empty };
+  // 打错人：子弹少一发、扣 8 秒
+  const wrong = await g(() => {
+    const V = __vasily; const d = V.G.duel; const civ = d.sc.figures.find((f) => f.kind === 'civ');
+    civ.lift = 1; civ.away = false; civ.timer = 9; const h = V.scene.figureHead(civ);
+    d.cam.x = h.x; d.cam.y = h.y; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1;
+    const b0 = d.bullets; const t0 = d.timeLeft; const r = d.triggerUp();
+    return { kind: r.kind, db: b0 - d.bullets, dt: t0 - d.timeLeft };
   });
-  check(fair.bad === 0 && fair.empty === 0, '九张背景 300 个随机局里，对面都藏在能瞄到的地方');
+  check(wrong.kind === 'wrong' && wrong.db === 1 && wrong.dt >= 7.9, '打错人：少一发子弹，扣 8 秒');
+  await page.waitForTimeout(120);
+  await snap('07_打错人');
+
+  // 换窗：点下面那栋楼的另一扇窗
+  const me0 = await g(() => ({ ...__vasily.G.duel.me }));
+  const cell = await g(() => { const V = __vasily; const p = V.panelR; const d = V.G.duel; const c = (d.me.c + 3) % 6; const cw = (p.w - 20) / 6; const ch = (p.h - 22) / 3; return { x: p.x + 10 + cw * (c + 0.5), y: p.y + 16 + ch * (d.me.r + 0.5), c }; });
+  await page.mouse.click(cell.x * S, cell.y * S);
+  await page.waitForTimeout(300);
+  check((await g(() => __vasily.G.duel.moving)) > 0, '点另一扇窗：开始爬过去');
+  await snap('08_换窗');
+  await page.waitForTimeout(1500);
+  const me1 = await g(() => ({ me: { ...__vasily.G.duel.me }, heat: __vasily.G.duel.heat }));
+  check(me1.me.c === cell.c && me1.me.c !== me0.c && me1.heat < 0.1, '爬到新窗：他对你位置的把握清零');
+
+  // 他会学你：同一扇窗露头三次，他预先瞄着
+  await g(() => { const d = __vasily.G.duel; d.peeks = 0; d.enemy.mode = 'hide'; d.enemy.timer = 9; });
+  for (let i = 0; i < 3; i++) { await page.mouse.click(...at(btn.eye)); await page.waitForTimeout(400); }
+  const learned = await g(() => { const d = __vasily.G.duel; return { peeks: d.peeks, onMe: d.onMe(), heat: d.heat }; });
+  check(learned.peeks >= 3 && learned.onMe && learned.heat >= 0.9, '同一扇窗露头三次：他记住了，红圈直接等在你窗口');
+
+  // 打空：他缩回去换窗
+  const win0 = await g(() => __vasily.G.duel.sc.enemy.win.x + ',' + __vasily.G.duel.sc.enemy.win.y);
+  await g(() => { const d = __vasily.G.duel; d.lock = 0; d.heat = 0; d.cam.x = 200; d.cam.y = 200; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1; d.triggerUp(); });
+  await page.waitForFunction(() => !__vasily.G.duel.relocating, null, { timeout: 4000 });
+  const win1 = await g(() => __vasily.G.duel.sc.enemy.win.x + ',' + __vasily.G.duel.sc.enemy.win.y);
+  check(win1 !== win0, '打空一发：他缩回去，换一扇窗重新藏');
+
+  // 子弹打光 → 小雨扔一发（广告占位）
+  await g(() => { const d = __vasily.G.duel; d.lock = 0; d.heat = 0; d.drawLeft = -1; d.cam.x = 600; d.cam.y = 200; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; d.recoverSec = 0; d.duck = 0; d.holding = true; d.holdSec = 1; d.triggerUp(); });
+  await page.waitForTimeout(150);
+  check((await mode()) === 'dry', '三发都浪费了：子弹打光');
+  await snap('09_子弹打光');
+  await clickBtn('ammo');
+  check((await mode()) === 'ad', '让小雨扔子弹：先放广告占位');
+  await page.waitForFunction(() => __vasily.G.mode === 'ammoGift', null, { timeout: 5000 });
+  await page.waitForTimeout(400); await snap('10_小雨扔子弹');
+  await page.waitForFunction(() => __vasily.G.mode === 'play', null, { timeout: 3000 });
+  check((await g(() => __vasily.G.duel.bullets)) === 1, '接住一发，接着打');
+
+  // 打中：三格子弹时间 → 结算星星
+  const hit = await shootSniper();
+  check(hit.hit, '打中狙击手');
+  await page.waitForTimeout(150); await snap('11a_嘣');
+  await page.waitForTimeout(350); await snap('11b_子弹飞');
+  await page.waitForTimeout(500); await snap('11c_爆头');
+  await page.waitForFunction(() => __vasily.G.mode === 'result', null, { timeout: 4000 });
+  await page.waitForTimeout(2500);
+  await snap('12_结算');
+  const res = await g(() => ({ r: __vasily.G.resultInfo, s: __vasily.team.state() }));
+  check(res.r.stars >= 1 && res.s.stars.c1 === res.r.stars && res.s.money > 0, '过关：记下星星（' + res.r.stars + ' 颗）、拿奖金');
+  check(!res.r.conds[0], '浪费了子弹：「一发没浪费」那颗星没拿到');
+  check(await g(() => __vasily.team.unlockedCards().length === 3 && __vasily.levelUnlocked(__vasily.LV.LEVELS[1])), '第一次过关：解锁下一关和一张新卡');
+
+  // —— 第三关：两个回合，中间换点位；焦躁型敲窗台 ——
+  await g(() => { __vasily.team.state().cleared.push('c2'); });
+  await enterLevel(2);
+  check((await mode()) === 'play' && (await g(() => __vasily.G.level.rounds.length)) === 2, '第三关两个回合');
+  const tapSeen = await g(() => { const d = __vasily.G.duel; d.enemy.mode = 'hide'; d.enemy.timer = 9; return d.tapping(); });
+  check(tapSeen, '焦躁型缩着时敲窗台（他的破绽）');
+  await shootSniper();
+  await page.waitForFunction(() => __vasily.G.mode === 'move', null, { timeout: 4000 });
+  check(true, '打完一个回合：跑去下一个点位');
+  await page.waitForFunction(() => __vasily.G.mode === 'intro', null, { timeout: 4000 });
+  await tap();
+  check((await g(() => __vasily.G.roundIdx)) === 1, '进第二个回合');
+  // 被瞄准 → 叫小雨拉起来 → 重打这个回合
+  await g(() => { const d = __vasily.G.duel; d.helmets = 0; d.enemy.mode = 'peek'; d.enemy.timer = 9; d.seek.x = d.seek.tx = d.me.c; d.seek.y = d.seek.ty = d.me.r; d.seek.dwell = 9; d.lock = 0.95; });
+  await page.waitForFunction(() => __vasily.G.duel.drawLeft >= 0, null, { timeout: 3000 });
+  await snap('13_他瞄准你');
+  await page.waitForFunction(() => __vasily.G.mode === 'dead', null, { timeout: 3000 });
+  await clickBtn('rescue');
+  await page.waitForFunction(() => __vasily.G.mode === 'rescue', null, { timeout: 5000 });
+  await page.waitForFunction(() => __vasily.G.mode === 'play', null, { timeout: 5000 });
+  check(await g(() => __vasily.G.attempt === 1 && __vasily.G.stats.rescued === 1), '被打死：小雨拉起来，重打这个回合');
+  await shootSniper();
+  await page.waitForFunction(() => __vasily.G.mode === 'result', null, { timeout: 4000 });
+  check(await g(() => !__vasily.G.resultInfo.conds[1]), '叫了拉人：「没叫队友拉人」那颗星没拿到');
+
+  // —— 第四关：大雾一阵一阵 ——
+  await g(() => { const s = __vasily.team.state(); ['c3'].forEach((id) => s.cleared.indexOf(id) < 0 && s.cleared.push(id)); });
+  await enterLevel(3);
+  const fogs = await g(() => { const d = __vasily.G.duel; let lo = 9, hi = 0; for (let i = 0; i < 600; i++) { d.t += 1 / 60; d.update(0); lo = Math.min(lo, d.fog); hi = Math.max(hi, d.fog); } return { lo, hi }; });
+  check(fogs.hi > 0.8, '大雾：会浓到看不清');
+  await page.waitForTimeout(200); await snap('14_大雾');
+
+  // —— 第五关：假人 ——
+  await g(() => { __vasily.team.state().cleared.push('c4'); });
+  await enterLevel(4);
+  const dk = await g(() => { const V = __vasily; const d = V.G.duel; const q = d.sc.figures.find((f) => f.kind === 'decoy'); if (!q) return 'none'; q.lift = 1; q.up = true; q.timer = 9; const h = V.scene.figureHead(q); d.cam.x = h.x; d.cam.y = h.y; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1; return d.triggerUp().kind; });
+  check(dk === 'decoy', '狡猾型摆了头盔假人：打中假人算打错');
+
+  // —— 第六关：掩护小雨 ——
+  await g(() => { __vasily.team.state().cleared.push('c5'); });
+  await enterLevel(5);
+  const esc = await g(() => { const d = __vasily.G.duel; const m = d.sc.mate; m.state = 'run'; m.timer = 9; d.enemy.mode = 'peek'; d.enemy.timer = 99; return d.aimingMate(); });
+  check(esc, '小雨在街上跑、他探着头：他瞄的是小雨，不是你');
+  await page.waitForTimeout(300); await snap('15_掩护小雨');
+  await g(() => { const m = __vasily.G.duel.sc.mate; m.lock = 0.98; m.state = 'run'; m.covers = [m.x, m.x + 2000]; m.next = 1; });
+  await page.waitForFunction(() => __vasily.G.mode === 'fail', null, { timeout: 4000 });
+  check((await g(() => __vasily.G.failReason)) === 'mateDown', '小雨被锁定满了：这关输');
+  await page.waitForTimeout(2300); await snap('16_输了回放');
+
+  // —— 第七关：鸽子 + 换位型 ——
+  await g(() => { __vasily.team.state().cleared.push('c6'); });
+  await enterLevel(6);
+  const pig = await g(() => { const d = __vasily.G.duel; d.enemy.mode = 'hide'; d.enemy.timer = 0.01; d.update(0.05); d.update(0.05); return d.sc.flocks.some((f) => f.state === 'fly'); });
+  check(pig, '他探头：那栋楼顶的鸽子飞起来（线索）');
+  const mv = await g(() => { const V = __vasily; const d = V.G.duel; const w0 = d.sc.enemy.win; d.enemy.mode = 'peek'; d.enemy.timer = 9; d.sc.enemy.lift = 1; const h = V.scene.enemyHead(d.sc, 1); d.cam.x = h.x; d.cam.y = h.y; d.duck = 0; for (let i = 0; i < 120; i++) { d.update(1 / 60); d.cam.x = V.scene.enemyHead(d.sc, 1).x; } return { moved: d.sc.enemy.win !== w0, trail: d.sc.trail.length }; });
+  check(mv.moved && mv.trail > 0, '换位型被你盯住就换窗，路过的窗帘一扇扇动');
+
+  // —— 第八关：夜里，一发子弹 ——
+  await g(() => { __vasily.team.state().cleared.push('c7'); });
+  await enterLevel(7);
+  check(await g(() => __vasily.G.duel.sc.night && __vasily.G.duel.bullets === 1), '夜里、每回合只有一发子弹');
+  await page.waitForTimeout(200); await snap('17_夜里');
+  // 时间到
+  await g(() => { __vasily.G.duel.timeLeft = 0.05; });
+  await page.waitForFunction(() => __vasily.G.mode === 'fail', null, { timeout: 3000 });
+  check((await g(() => __vasily.G.failReason)) === 'timeout', '倒计时到了：输');
+
+  // —— Boss：三条命，每挨一枪换一招 ——
+  await g(() => { const s = __vasily.team.state(); s.cleared.push('c8'); ['c1', 'c2', 'c3', 'c4', 'c5'].forEach((id) => (s.stars[id] = 2)); });
+  await enterLevel(8);
+  check((await mode()) === 'play' && (await g(() => __vasily.G.duel.bossHp)) === 3, 'Boss 关：先放出场动画，再开打；他有三条命');
+  const b1 = await shootSniper();
+  const st1 = await g(() => ({ hp: __vasily.G.duel.bossHp, ph: __vasily.G.duel.phase, st: __vasily.G.duel.state, b: __vasily.G.duel.bullets }));
+  check(b1.boss && st1.hp === 2 && st1.ph === 1 && st1.st === 'play' && st1.b === 3, 'Boss 挨第一枪：还没完，换第二招，子弹重给三发');
+  await page.waitForTimeout(250); await snap('18_Boss还没完');
+  await page.waitForFunction(() => !__vasily.G.duel.relocating, null, { timeout: 4000 });
+  await shootSniper();
+  await page.waitForFunction(() => !__vasily.G.duel.relocating, null, { timeout: 4000 });
+  check(await g(() => __vasily.G.duel.sc.figures.filter((f) => f.kind === 'decoy').length >= 2 && __vasily.G.duel.tactic().fog), 'Boss 第三段：摆两个假人，还起雾');
+  await shootSniper();
+  await page.waitForFunction(() => __vasily.G.mode === 'result', null, { timeout: 5000 });
+  await page.waitForTimeout(2500);
+  check(await g(() => __vasily.G.resultInfo.reveal && __vasily.team.state().revealed), '第一次打败 Boss：网吧揭晓，战队解锁');
+  await snap('19_Boss结算');
+  await clickBtn('continue');
+  check((await mode()) === 'reveal', '继续：放网吧揭晓');
+
+  // 原作玩法样机还在
+  await g(() => __vasily.startClassic());
+  await page.mouse.click(...at(btn.trig));
+  check((await g(() => __vasily.G.classic.shots)) === 0, '原作样机：望远镜状态下不能开枪');
+
+  // 公平：九张背景、几百个随机局，每个人影都在能瞄到的地方
+  const fair = await g(() => {
+    const { scene, D } = __vasily;
+    const ids = ['oldtown', 'market', 'tanks', 'port', 'station', 'factory', 'neon', 'desert', 'eaves'];
+    let bad = 0, short = 0;
+    for (let s = 1; s <= 300; s++) {
+      const sc = scene.build(s * 7, { poseShift: 3, contrast: 0.2 }, D, ids[s % 9], { figures: 5, decoys: 1 });
+      if (sc.figures.length < 6) short++;
+      sc.figures.forEach((f) => {
+        const h = scene.figureHead(f, 1);
+        if (h.x < D / 2 - 8 || h.x > sc.w - D / 2 + 8 || h.y < D / 2 || h.y > sc.h - D / 2) bad++;
+      });
+    }
+    return { bad, short };
+  });
+  check(fair.bad === 0 && fair.short === 0, '九张背景 300 个随机局：六个人影都摆得下，而且都能瞄到');
 
   check(errors.length === 0, '没有报错' + (errors.length ? '：' + errors.join(' | ') : ''));
   await browser.close();

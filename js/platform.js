@@ -19,7 +19,10 @@ function setup(onTouch) {
         onTouch(type, list[i].identifier, list[i].clientX, list[i].clientY);
       }
     };
-    wx.onTouchStart(send('down'));
+    wx.onTouchStart((e) => {
+      unlockAudio();
+      send('down')(e);
+    });
     wx.onTouchMove(send('move'));
     wx.onTouchEnd(send('up'));
     wx.onTouchCancel(send('up'));
@@ -40,6 +43,7 @@ function setup(onTouch) {
     };
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      unlockAudio();
       canvas.setPointerCapture(e.pointerId);
       const p = pos(e);
       onTouch('down', e.pointerId, p[0], p[1]);
@@ -92,6 +96,55 @@ function showRewardedAd(adUnitId, onReward, onSkip) {
   return true;
 }
 
+// 音效：WebAudio（微信 wx.createWebAudioContext，浏览器 AudioContext）。放不出来就安静，不报错
+const sfx = require('./sfx.js');
+let audio = null;
+const buffers = {};
+let muted = false;
+function audioCtx() {
+  if (audio !== null) return audio;
+  try {
+    if (isWx && wx.createWebAudioContext) audio = wx.createWebAudioContext();
+    else if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) audio = new (window.AudioContext || window.webkitAudioContext)();
+    else audio = false;
+  } catch (e) {
+    audio = false;
+  }
+  return audio;
+}
+// 浏览器要在手指点下去的那一刻打开声音
+function unlockAudio() {
+  const a = audioCtx();
+  if (a && a.state === 'suspended' && a.resume) a.resume();
+}
+function sound(name, volume) {
+  if (muted) return;
+  const a = audioCtx();
+  if (!a) return;
+  try {
+    if (!buffers[name]) {
+      const sr = 22050;
+      const data = sfx.make(name, sr);
+      if (!data) return;
+      const buf = a.createBuffer(1, data.length, sr);
+      buf.getChannelData(0).set(data);
+      buffers[name] = buf;
+    }
+    const src = a.createBufferSource();
+    src.buffer = buffers[name];
+    const g = a.createGain();
+    g.gain.value = volume === undefined ? 0.6 : volume;
+    src.connect(g);
+    g.connect(a.destination);
+    src.start(0);
+  } catch (e) {
+    // 放不出声音就算了
+  }
+}
+function setMuted(v) {
+  muted = !!v;
+}
+
 // 存档：微信用 wx.setStorageSync，浏览器用 localStorage
 function load(key) {
   try {
@@ -116,4 +169,4 @@ function exposeForTest(name, value) {
   if (!isWx && typeof window !== 'undefined') window[name] = value;
 }
 
-module.exports = { isWx, setup, now, nextFrame, vibrate, showRewardedAd, load, save, exposeForTest };
+module.exports = { isWx, setup, now, nextFrame, vibrate, showRewardedAd, load, save, exposeForTest, sound, unlockAudio, setMuted };

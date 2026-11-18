@@ -62,7 +62,7 @@ const HIT_R = 8;
 
 function createClassic(seed, D, config) {
   const r = rng(seed);
-  const sc = scene.build(seed, config.duels[0], D, 'oldtown');
+  const sc = scene.build(seed, { poseShift: 3, contrast: 0.2 }, D, 'oldtown');
   // 场景自带的那个敌人藏到画外，我们自己摆三个
   sc.enemy.win = { x: -999, y: -999, w: 16, h: 22 };
   const spots = sc.spots.slice();
@@ -237,11 +237,11 @@ module.exports = { createClassic, HP, TIME };
 
 });
 __def("js/config.js", function (module, exports, require) {
-// 《瓦西里》原型 · 所有可以调的数都在这里。
+// 《瓦西里》原型 · 所有可以调的数都在这里。关卡本身在 levels.js。
 // 单位：时间是秒（blinkMs 是毫秒），距离是屏幕上的点（375 宽的手机上量）。
 
 const config = {
-  version: '瓦西里 · 原型 0.4',
+  version: '瓦西里 · 原型 0.5',
 
   // 激励视频广告位 id。空着 = 放「广告占位」倒计时；上线前填后台建的 id。
   rewardedAdUnitId: '',
@@ -250,15 +250,8 @@ const config = {
   // 局外故事整块开关（类目卡住时关掉，玩法不受影响）
   storyEnabled: true,
 
-  duelsPerLevel: 3, // 一场比赛打几个对手
-  rescuesPerLevel: 1, // 每场最多被女队友拉起几次（观察手练到 3 级 +1）
-
-  // 一次网吧赛 = 三场比赛，每场三个对手，每个对手一张不同的背景（主题名见 themes.js）
-  matches: [
-    { name: '第一场', place: '老城区', themes: ['oldtown', 'market', 'tanks'] },
-    { name: '第二场', place: '港口和车站', themes: ['port', 'station', 'factory'] },
-    { name: '第三场', place: '夜里的城', themes: ['neon', 'desert', 'eaves'] },
-  ],
+  rescuesPerLevel: 1, // 每关最多被女队友拉起几次（观察手练到 3 级 +1）
+  ammoAdsPerLevel: 1, // 每关最多让小雨扔一发子弹几次
 
   breath: {
     periodSec: 3.2, // 一次呼吸多长
@@ -270,16 +263,15 @@ const config = {
     recoverSec: 0.5, // 松手后要喘多久才能再屏息
   },
 
-  // 屏息时，准星离他的头够近，会被轻轻吸过去（手机上手指拖不了那么准）
-  // radius：第 1、2、3 场各多近才吸（第三场不吸）；perSec：吸得多快
-  assist: { radius: [10, 5, 0], perSec: 3 },
+  // 屏息时，准星离他的头够近，会被轻轻吸过去。按关卡序号（从 0 起）查表，查不到就是 0
+  assist: { radius: [10, 10, 8, 6, 5, 4, 3, 0, 0], perSec: 3 },
 
   // 他的镜子怎么在你这栋楼上找你（画面下方的红圈）
   seek: {
     spread: 0.6, // 他刚开始乱看的范围（1 = 整栋楼）
     dwellSec: 0.7, // 每扇窗看多久
     coolPerSec: 0.1, // 你缩着头时，他对你位置的把握每秒忘掉多少
-    perMatch: 0.15, // 每过一场，他找得快多少
+    glintCells: 1.3, // 红圈离你几扇窗以内，他的镜片会反光（认人的线索）
   },
 
   heart: {
@@ -290,29 +282,40 @@ const config = {
 
   shot: {
     reloadSec: 1.0, // 开一枪后多久能再开
+    wrongPenaltySec: 8, // 打错人扣几秒
   },
 
-  // 一场里第 1、2、3 个对手（index 0、1、2）
-  // 他的节奏：缩着 hideMin~hideMax 秒 → 探头 peekSec 秒（探头时才在找你，也才打得到他）→ 缩回去
-  // seekSpeed：红圈每秒挪几扇窗；heatRate：你露着头时他每秒多清楚你在哪；
-  // lockSec：红圈停在你窗口上多久锁定你；quickDraw：锁定后几秒开枪；decoy：会摆假人
-  duels: [
-    { name: '耐心型', sub: '探得少，但一探就是好久', distractors: 2, blinkMs: 260, poseShift: 3.5, contrast: 0.24,
-      hideMin: 2.0, hideMax: 2.0, peekSec: 3.0, seekSpeed: 2.5, heatRate: 0.1, lockSec: 0.8, quickDraw: 0.9, decoy: false },
-    { name: '焦躁型', sub: '探得勤，红圈跑得快', distractors: 3, blinkMs: 240, poseShift: 3, contrast: 0.2,
-      hideMin: 1.0, hideMax: 1.8, peekSec: 1.6, seekSpeed: 3.4, heatRate: 0.14, lockSec: 0.65, quickDraw: 0.75, decoy: false },
-    { name: '狡猾型', sub: '摆了个假人骗你开枪', distractors: 4, blinkMs: 220, poseShift: 2.5, contrast: 0.16,
-      hideMin: 1.4, hideMax: 2.4, peekSec: 1.8, seekSpeed: 3, heatRate: 0.16, lockSec: 0.6, quickDraw: 0.65, decoy: true },
-  ],
+  move: { sec: 1.5 }, // 换窗爬过去要几秒
+  learn: { warnAt: 2, aimAt: 3 }, // 同一扇窗露头第几次他开始记住、第几次他预先瞄着
+
+  // 对手：招数和破绽。peek 节奏、红圈速度、锁定和开枪时间都在这里
+  // still：别人都动只有他不动；tap：缩着时敲窗台；decoy：摆几个头盔假人；mover：被你盯住就换窗
+  opponents: {
+    patient: { name: '耐心型', tell: '别人都在动，只有他一动不动', hideMin: 2.0, hideMax: 2.4, peekSec: 3.0,
+      seekSpeed: 2.5, heatRate: 0.1, lockSec: 0.8, quickDraw: 0.9, poseShift: 3, still: true },
+    nervous: { name: '焦躁型', tell: '缩着的时候会敲窗台', hideMin: 1.0, hideMax: 1.8, peekSec: 1.6,
+      seekSpeed: 3.4, heatRate: 0.14, lockSec: 0.65, quickDraw: 0.75, poseShift: 3, tap: true },
+    sly: { name: '狡猾型', tell: '摆了头盔假人：缩头再起来时，假人不会挪', hideMin: 1.4, hideMax: 2.4, peekSec: 1.8,
+      seekSpeed: 3, heatRate: 0.15, lockSec: 0.6, quickDraw: 0.7, poseShift: 2.5, decoy: 1 },
+    mover: { name: '换位型', tell: '被你盯住就换窗，路过的窗帘会一扇扇动', hideMin: 1.4, hideMax: 2.2, peekSec: 2.0,
+      seekSpeed: 3, heatRate: 0.15, lockSec: 0.65, quickDraw: 0.75, poseShift: 3, mover: true },
+    boss: { name: '老枪', tell: '三条命，每挨一枪换一招', hideMin: 1.4, hideMax: 2.2, peekSec: 2.2,
+      seekSpeed: 3.2, heatRate: 0.16, lockSec: 0.6, quickDraw: 0.7, poseShift: 3,
+      phases: [{ still: true }, { mover: true, seekSpeed: 3.6 }, { decoy: 2, tap: true, seekSpeed: 4, fog: true }] },
+  },
+
+  // 地图条件
+  conditions: {
+    fog: { name: '大雾', thickSec: 5, clearSec: 2.5, heatMul: 0.3 }, // 浓雾时他也看不清你
+    night: { name: '夜里', heatMul: 0.8 },
+    pigeons: { name: '鸽群', flushHeat: 0.25, backSec: 9 },
+  },
+
+  // 掩护队友过街
+  escort: { runSec: 2.2, hideSec: [2, 3.2], lockSec: 2.4, speed: 60 },
 
   // —— 局外：奖金 ——
-  money: { perKill: 20, perMatch: 50, perCup: 200 },
-};
-
-// 开枪判定圈：松手时，准星离他的头多近算打中（单位：点）。只在他探头时算。头的半径约 4.5。
-// 第一场 10、9.5、9；第二场 8.5、8、7.5；第三场 7、6.5、6。
-config.hitRadius = function (duelIndex, levelNo) {
-  return Math.max(6, 10 - duelIndex * 0.5 - (levelNo - 1) * 1.5);
+  money: { perRound: 20, perStar: 10 },
 };
 
 module.exports = config;
@@ -1043,25 +1046,29 @@ module.exports = {
 
 });
 __def("js/duel.js", function (module, exports, require) {
-// 一次对狙：文档里说的「积木」。
-// 放进去：seed、第几场、第几个对手、加成。拿出来：赢没赢、几秒、缩了几次头、打了几枪。
-// 只管规则，不管画（画在 main.js），也不碰微信，所以电竞高光那一步可以直接拿去用。
+// 一个回合的对狙：文档里说的「积木」。
+// 放进去：seed、回合设定（levels.js）、加成。拿出来：赢没赢、用时、打了几枪、被没被瞄准过。
+// 只管规则，不管画（画在 main.js），也不碰微信。
 //
-// 0.4 的博弈：谁先暴露谁死。
+// 博弈：谁先暴露谁死。
 //   你露着头才看得见、才能开枪，但他也正在找你（画面下方那栋楼上的红圈，就是他的镜子）。
-//   缩头：安全，还会让画面变一下（= 眨眼找茬），但你什么都看不见、打不了。
-//   他也一样：他探头时才在找你（红圈在动），那也正是你唯一打得中他的时候。
-//   红圈停在你窗口上、你又露着头 → 锁定圈转满 → 他瞄准你（镜片反光）→ 抢先开枪，或者马上缩头。
-//   打空一枪 = 枪口火光，他立刻知道你在哪。
+//   缩头：安全，还会让画面变一下（= 眨眼找茬），但看不见、打不了。按住就一直缩着。
+//   他探头时才在找你（红圈在动），那也正是你唯一打得中他的时候。
+// 0.5 加的五条：
+//   认出他：对面有好几个人影，只有一个是狙击手。红圈靠近你时他的镜片会反光；每种对手还有自己的破绽。
+//   子弹有限：打空一发他换窗重新藏；打错人扣时间。用完还没打中就输。
+//   倒计时：整回合有时限。
+//   换窗：点下面那栋楼的另一扇窗，爬过去，他对你位置的把握清零。
+//   他会学你：同一扇窗露头第三次，他已经预先瞄着那里。
 const scene = require('./scene.js');
 const { clamp, lerp, easeOut, rng } = require('./util.js');
 
 const RISE_SEC = 0.25; // 他探头、缩头的动作要多久
-const FAKE_SEC = 0.3; // 假人探头露多久
 const HITTABLE_LIFT = 0.45; // 头抬到多高才算露出来
 const COLS = 6; // 你这栋楼（下方小图）几列几行窗户
 const ROWS = 3;
 const WATCH_SEC = 3; // 你缩头躲开他的瞄准后，他盯着你窗口多久才放弃
+const OTHER_R = 7; // 打路人 / 假人的判定圈
 
 const NO_MODS = {
   hitRadiusAdd: 0, settleMul: 1, holdMaxAdd: 0, heartMul: 1, quickDrawAdd: 0,
@@ -1070,64 +1077,84 @@ const NO_MODS = {
 
 function createDuel(opts) {
   const cfg = opts.config;
-  const idx = Math.min(opts.duelIndex, cfg.duels.length - 1);
-  const dcfg = cfg.duels[idx];
-  const m = opts.levelNo - 1; // 第几场（0、1、2）
+  const R = opts.round;
+  const opp = cfg.opponents[R.opp];
+  const phases = opp.phases || [{}];
   const mods = Object.assign({}, NO_MODS, opts.mods || {});
-  const sc = scene.build(opts.seed, dcfg, opts.scopeD, opts.theme);
+  const cond = R.cond || null;
+  const sc = scene.build(opts.seed, { poseShift: opp.poseShift, contrast: 0.2 }, opts.scopeD, R.theme, {
+    figures: R.figures || 1,
+    decoys: opp.decoy || (phases[0].decoy || 0),
+    night: cond === 'night',
+    pigeons: cond === 'pigeons',
+    escort: R.goal === 'escort',
+  });
   const half = opts.scopeD / 2;
   const rand = rng(opts.seed ^ 0x5bd1e995);
   const S = cfg.seek;
 
   const d = {
     sc,
-    dcfg,
+    round: R,
+    opp,
     mods,
-    levelNo: opts.levelNo,
-    duelIndex: opts.duelIndex,
-    hitRadius: cfg.hitRadius(opts.duelIndex, opts.levelNo) + mods.hitRadiusAdd,
-    quickDrawSec: dcfg.quickDraw * (1 - S.perMatch * m * 0.5) + mods.quickDrawAdd,
-    lockSec: dcfg.lockSec * (1 - S.perMatch * m),
-    heatRate: dcfg.heatRate * (1 + S.perMatch * 2 * m) * mods.enemyRateMul,
-    seekSpeed: dcfg.seekSpeed * (1 + S.perMatch * m),
+    cond,
+    levelIndex: opts.levelIndex || 0,
+    COLS,
+    ROWS,
+    phase: 0, // Boss 第几段
+    bossHp: phases.length,
+    hitRadius: (R.hitR || 9) + mods.hitRadiusAdd,
     cam: { x: sc.w / 2, y: sc.h / 2 },
     t: 0,
-    state: 'play', // play → hit / dead
+    state: 'play', // play → hit / dead / dry（子弹用完）/ timeout / mateDown
+    bullets: R.bullets || 3,
+    timeLeft: R.time || 80,
     // 你
     me: { c: Math.floor(rand() * COLS), r: Math.floor(rand() * ROWS) },
     duck: 0, // 0 = 露着头，1 = 缩在掩体后
     duckHeld: false,
     duckBottomed: true, // 这一次缩头已经缩到底了吗（点一下也要缩到底再起来）
     blinks: 0,
-    exposedSec: 0, // 一共露了多久
+    exposedSec: 0,
+    peeks: 0, // 在这扇窗露头几次了（他会记住）
+    moving: 0, // 正在爬向另一扇窗：还剩几秒
+    moveTo: null,
     helmets: mods.helmets,
     // 他的镜子在你这栋楼上找你
     seek: { x: rand() * (COLS - 1), y: rand() * (ROWS - 1), tx: 0, ty: 0, dwell: 0 },
     heat: 0, // 他多清楚你在哪（0..1）
     lock: 0, // 锁定圈（0..1），满了他就瞄准你
     drawLeft: -1, // 他正在瞄你：还剩几秒开枪（≥ 0 时）
-    watch: 0, // 你缩头躲开瞄准后，他还盯着你窗口几秒
+    watch: 0,
     flashSec: 0, // 他开枪的火光（打飞你的诱饵头盔时），这几秒他暴露了
+    stare: 0, // 你盯着他看了多久（换位型会跑）
+    relocating: false,
+    fog: 0,
     // 开枪
     heart: 1,
     holding: false,
     holdSec: 0,
     recoverSec: 0,
-    phase: 0,
+    breath: 0,
     sway: { x: 0, y: 0 },
     reloadSec: 0,
     shots: 0,
-    impacts: [], // 每一枪的落点：{x, y, t, kind: 'hit'|'close'|'miss'|'covered'|'decoy'}
+    wasted: 0, // 浪费了几发（打空、打错）
+    lockedOnce: false, // 被他瞄准过没有
+    impacts: [], // 每一枪的落点：{x, y, t, kind}
     hitAt: null,
-    events: [], // 给画面看的事：'helmet'（头盔被打飞）、'spotted'（打空暴露）
-    // 他的探头节奏
-    enemy: { mode: 'hide', timer: lerp(dcfg.hideMin, dcfg.hideMax, rand()) * 0.5, fake: false },
-    decoy: { mode: 'hide', timer: 1 + rand() * 2 },
+    events: [], // 给画面和声音的事
+    seekTrail: [], // 红圈走过的路（输了回放用）
+    enemy: { mode: 'hide', timer: lerp(opp.hideMin, opp.hideMax, rand()) * 0.6 },
   };
-  pickTarget();
 
-  d.COLS = COLS;
-  d.ROWS = ROWS;
+  function tactic() {
+    return Object.assign({}, opp, phases[d.phase] || {});
+  }
+  d.tactic = tactic;
+  sc.enemy.swayOn = !tactic().still;
+  pickTarget();
 
   d.pan = function (dx, dy) {
     d.cam.x = clamp(d.cam.x - dx, half, sc.w - half);
@@ -1135,14 +1162,19 @@ function createDuel(opts) {
   };
 
   d.exposed = function () {
-    return d.duck < 0.5;
+    return d.duck < 0.5 && d.moving <= 0;
   };
   d.enemyExposed = function () {
     return sc.enemy.lift >= HITTABLE_LIFT;
   };
   // 他在找你吗：探头时才找（红圈在动）
   d.searching = function () {
-    return d.state === 'play' && (d.enemy.mode === 'peek' || d.enemy.mode === 'rise') && !d.enemy.fake;
+    return d.state === 'play' && (d.enemy.mode === 'peek' || d.enemy.mode === 'rise') && !d.relocating;
+  };
+  // 他在瞄队友（掩护关）：这时候他不找你
+  d.aimingMate = function () {
+    const m = sc.mate;
+    return !!m && !m.done && !m.down && m.state === 'run' && d.searching();
   };
 
   // —— 缩头 ——
@@ -1152,6 +1184,7 @@ function createDuel(opts) {
     if (d.duckBottomed) {
       d.duckBottomed = false;
       d.blinks += 1;
+      d.events.push({ kind: 'duck' });
     }
     if (d.holding) {
       d.holding = false; // 缩头就憋不住了，这一枪不开
@@ -1162,9 +1195,24 @@ function createDuel(opts) {
     d.duckHeld = false;
   };
 
+  // —— 换窗：爬到你这栋楼的另一扇窗 ——
+  d.moveWindow = function (c, r) {
+    if (d.state !== 'play' || d.moving > 0) return false;
+    if (c === d.me.c && r === d.me.r) return false;
+    if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
+    d.moving = cfg.move.sec;
+    d.moveTo = { c, r, from: { c: d.me.c, r: d.me.r } };
+    d.holding = false;
+    d.events.push({ kind: 'crawl' });
+    return true;
+  };
+
   // 缩到底的那一刻画面才变，变化的地方就不会「跳」
   function applyChanges() {
     sc.enemy.pose = 1 - sc.enemy.pose;
+    sc.figures.forEach((f) => {
+      if (f.kind === 'civ' && rand() < 0.4) f.pose = 1 - f.pose;
+    });
     const inView = [];
     const outView = [];
     sc.distractors.forEach((x) => {
@@ -1172,12 +1220,12 @@ function createDuel(opts) {
       (near ? inView : outView).push(x);
     });
     const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
-    shuffle(inView).concat(shuffle(outView)).slice(0, dcfg.distractors).forEach(scene.toggle);
+    shuffle(inView).concat(shuffle(outView)).slice(0, 2 + d.levelIndex % 3).forEach(scene.toggle);
   }
 
   // —— 开枪 ——
   d.triggerDown = function () {
-    if (d.state !== 'play' || d.duck > 0 || d.reloadSec > 0 || d.recoverSec > 0) return;
+    if (d.state !== 'play' || d.duck > 0 || d.moving > 0 || d.reloadSec > 0 || d.recoverSec > 0 || d.bullets <= 0) return;
     d.holding = true;
     d.holdSec = 0;
   };
@@ -1189,38 +1237,99 @@ function createDuel(opts) {
     return fire();
   };
 
+  function flushAt(x) {
+    let flushed = false;
+    sc.flocks.forEach((fl) => {
+      const b = sc.buildings[fl.b];
+      if (fl.state === 'sit' && x >= b.x - 10 && x <= b.x + b.w + 10) {
+        fl.state = 'fly';
+        fl.t = d.t;
+        flushed = true;
+      }
+    });
+    if (flushed) d.events.push({ kind: 'wings' });
+    return flushed;
+  }
+
   function fire() {
     d.shots += 1;
+    d.bullets -= 1;
     d.reloadSec = cfg.shot.reloadSec * mods.reloadMul;
     const aim = d.aimWorld();
     const head = scene.enemyHead(sc, 1);
     const dist = Math.hypot(aim.x - head.x, aim.y - head.y);
-    let kind;
-    if (sc.decoy && sc.decoy.lift > 0.4) {
-      const dh = scene.decoyHead(sc);
-      if (Math.hypot(aim.x - dh.x, aim.y - dh.y) <= d.hitRadius) kind = 'decoy';
+    let kind = null;
+    if (d.enemyExposed() && dist <= d.hitRadius) kind = 'hit';
+    if (!kind) {
+      const other = sc.figures.find((f) => f !== sc.enemy && f.lift > 0.4 && Math.hypot(aim.x - scene.figureHead(f).x, aim.y - scene.figureHead(f).y) <= OTHER_R);
+      if (other) kind = other.kind === 'decoy' ? 'decoy' : 'wrong';
     }
     if (!kind) {
-      if (d.enemyExposed() && dist <= d.hitRadius) kind = 'hit';
-      else if (!d.enemyExposed() && dist <= d.hitRadius + 6) kind = 'covered';
+      if (!d.enemyExposed() && dist <= d.hitRadius + 6) kind = 'covered';
       else if (dist <= d.hitRadius * 2.5) kind = 'close';
       else kind = 'miss';
     }
     d.impacts.push({ x: aim.x, y: aim.y, t: d.t, kind, dist });
+    d.events.push({ kind: 'shot', result: kind });
     if (kind === 'hit') {
+      if (d.bossHp > 1) {
+        bossNextPhase(aim);
+        return { hit: true, boss: true, kind, dist };
+      }
       d.state = 'hit';
       d.hitAt = aim;
       return { hit: true, kind, dist };
     }
-    // 打空：枪口火光，他马上知道你在哪（消音器例外）
+    d.wasted += 1;
+    if (kind === 'wrong' || kind === 'decoy') d.timeLeft = Math.max(0.5, d.timeLeft - cfg.shot.wrongPenaltySec);
+    // 枪口火光：他马上知道你在哪（消音器例外）
     if (!mods.silent) {
-      d.heat = 1;
-      d.seek.x = d.me.c;
-      d.seek.y = d.me.r;
-      d.lock = Math.max(d.lock, 0.6);
-      d.events.push({ kind: 'spotted', t: d.t });
+      d.heat = Math.max(d.heat, 0.8);
+      d.seek.x = d.seek.tx = d.me.c;
+      d.seek.y = d.seek.ty = d.me.r;
+      d.lock = Math.max(d.lock, 0.5);
+      d.events.push({ kind: 'spotted' });
     }
+    if (sc.flocks.length && flushAt(aim.x)) d.heat = Math.min(1, d.heat + cfg.conditions.pigeons.flushHeat);
+    // 打空（不是打错人）：他缩回去换一扇窗
+    if (kind === 'miss' || kind === 'close' || kind === 'covered') startRelocate();
+    if (d.bullets <= 0) d.state = 'dry';
     return { hit: false, kind, dist };
+  }
+
+  // Boss 挨了一枪：头盔飞了，换窗，换一招，子弹重给
+  function bossNextPhase(aim) {
+    d.bossHp -= 1;
+    d.phase += 1;
+    d.hitAt = aim;
+    d.events.push({ kind: 'bossHit', hp: d.bossHp });
+    d.bullets = R.bullets || 3;
+    d.heat = 0.3;
+    d.lock = 0;
+    d.drawLeft = -1;
+    d.watch = 0;
+    const tc = tactic();
+    sc.enemy.swayOn = !tc.still;
+    // 新的一招要摆假人：在空窗里多放几个头盔
+    const want = tc.decoy || 0;
+    const have = sc.figures.filter((f) => f.kind === 'decoy').length;
+    for (let i = have; i < want; i++) {
+      const free = sc.spots.filter((w) => !sc.figures.some((f) => Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 60));
+      if (!free.length) break;
+      const w = free[Math.floor(rand() * free.length)];
+      sc.figures.push({ kind: 'decoy', win: w, lift: 0, pose: 0, shift: 0, color: sc.enemy.color, sway: 0, swayOn: false, phase: 0, timer: 1 });
+    }
+    sc.decoy = sc.figures.find((f) => f.kind === 'decoy') || null;
+    startRelocate();
+  }
+
+  function startRelocate() {
+    if (d.relocating) return;
+    d.relocating = true;
+    if (d.enemy.mode !== 'hide') {
+      d.enemy.mode = 'fall';
+      d.enemy.timer = RISE_SEC;
+    }
   }
 
   d.aimWorld = function () {
@@ -1249,7 +1358,6 @@ function createDuel(opts) {
   };
 
   // —— 他的镜子怎么找你 ——
-  // 他越清楚你在哪（heat 越高），下一个看的窗口就越靠近你
   function pickTarget() {
     const s = d.seek;
     const spread = (1 - d.heat) * S.spread;
@@ -1266,6 +1374,8 @@ function createDuel(opts) {
         ty = Math.floor(rand() * ROWS);
       }
     }
+    // 开局几秒他不会直接看你那扇窗（别一上来就被撞上）
+    if (d.t < 5 && d.heat < 0.3 && tx === d.me.c && ty === d.me.r) tx = (tx + 2 + Math.floor(rand() * 3)) % COLS;
     s.tx = tx;
     s.ty = ty;
     s.dwell = S.dwellSec * (0.7 + rand() * 0.6);
@@ -1275,16 +1385,26 @@ function createDuel(opts) {
     return Math.abs(d.seek.x - d.me.c) < 0.5 && Math.abs(d.seek.y - d.me.r) < 0.5;
   }
   d.onMe = onMe;
+  d.seekDist = function () {
+    return Math.hypot(d.seek.x - d.me.c, d.seek.y - d.me.r);
+  };
+
+  function heatMul() {
+    let k = mods.enemyRateMul;
+    if (d.fog > 0) k *= lerp(1, cfg.conditions.fog.heatMul, d.fog);
+    if (cond === 'night') k *= cfg.conditions.night.heatMul;
+    return k;
+  }
 
   function updateSeek(dt) {
     const s = d.seek;
-    // 他瞄着你 / 盯着你的窗口：红圈不动
     if (d.drawLeft >= 0 || d.watch > 0) return;
-    if (d.searching()) {
+    if (d.searching() && !d.aimingMate()) {
+      const tc = tactic();
       const dx = s.tx - s.x;
       const dy = s.ty - s.y;
       const dist = Math.hypot(dx, dy);
-      const step = d.seekSpeed * dt;
+      const step = tc.seekSpeed * dt;
       if (dist > step) {
         s.x += (dx / dist) * step;
         s.y += (dy / dist) * step;
@@ -1294,17 +1414,16 @@ function createDuel(opts) {
         s.dwell -= dt;
         if (s.dwell <= 0) pickTarget();
       }
-      // 你露着头，他越看越清楚你在哪
-      if (d.exposed()) d.heat = Math.min(1, d.heat + d.heatRate * dt);
-      // 红圈停在你窗口上、你又露着头：锁定圈往上转
+      if (d.exposed()) d.heat = Math.min(1, d.heat + tc.heatRate * heatMul() * dt);
       if (onMe() && d.exposed()) {
-        d.lock += dt / d.lockSec;
+        d.lock += dt / tc.lockSec;
         if (d.lock >= 1) {
           d.lock = 1;
-          d.drawLeft = d.quickDrawSec;
+          d.drawLeft = tc.quickDraw + mods.quickDrawAdd;
+          d.lockedOnce = true;
           d.enemy.mode = 'peek';
           d.enemy.timer = 99;
-          d.enemy.fake = false;
+          d.events.push({ kind: 'aimed' });
         }
       } else d.lock = Math.max(0, d.lock - dt * 0.8);
     } else {
@@ -1316,53 +1435,182 @@ function createDuel(opts) {
   // 他的节奏：缩着 → 探头 → 缩回去。瞄着你、盯着你时一直露着
   function updateEnemy(dt) {
     const e = d.enemy;
+    const tc = tactic();
     const busy = d.drawLeft >= 0 || d.watch > 0 || d.flashSec > 0;
     if (!busy) e.timer -= dt;
-    if (e.mode === 'hide' && e.timer <= 0) {
+    if (e.mode === 'hide' && d.relocating) {
+      // 缩到窗台下了：换窗，窗帘一扇扇动
+      scene.relocateSniper(sc, rand, opts.scopeD, d.t);
+      d.relocating = false;
+      d.stare = 0;
+      e.timer = 1.6;
+    } else if (e.mode === 'hide' && e.timer <= 0) {
       e.mode = 'rise';
       e.timer = RISE_SEC;
+      // 鸽子：他探头的那栋楼顶上的鸽子飞起来
+      if (sc.flocks.length) flushAt(sc.enemy.win.x);
     } else if (e.mode === 'rise' && e.timer <= 0) {
       e.mode = 'peek';
-      e.timer = dcfg.peekSec;
+      e.timer = tc.peekSec;
     } else if (e.mode === 'peek' && e.timer <= 0) {
       e.mode = 'fall';
       e.timer = RISE_SEC;
     } else if (e.mode === 'fall' && e.timer <= 0) {
       e.mode = 'hide';
-      e.timer = lerp(dcfg.hideMin, dcfg.hideMax, rand());
+      e.timer = lerp(tc.hideMin, tc.hideMax, rand());
     }
     const k = clamp(1 - e.timer / RISE_SEC, 0, 1);
     sc.enemy.lift = busy || e.mode === 'peek' ? 1 : e.mode === 'rise' ? easeOut(k) : e.mode === 'fall' ? 1 - easeOut(k) : 0;
 
-    // 狡猾型的假人：另一扇窗里一个头盔，自己一会儿露一会儿缩（眨眼时它不会挪）
-    if (sc.decoy) {
-      const q = d.decoy;
-      q.timer -= dt;
-      if (q.timer <= 0) {
-        q.mode = q.mode === 'hide' ? 'peek' : 'hide';
-        q.timer = q.mode === 'peek' ? 1.2 + rand() * 1.2 : 1.5 + rand() * 2.5;
-      }
-      const target = q.mode === 'peek' ? 1 : 0;
-      sc.decoy.lift += clamp(target - sc.decoy.lift, -dt / RISE_SEC, dt / RISE_SEC);
+    // 换位型：被你盯着看就跑
+    if (tc.mover && d.exposed() && d.enemyExposed() && d.drawLeft < 0) {
+      const h = scene.enemyHead(sc, 1);
+      if (Math.hypot(h.x - d.cam.x, h.y - d.cam.y) < 45) d.stare += dt;
+      if (d.stare > 1.0) startRelocate();
     }
+  }
+
+  // 路人：一直轻轻晃，隔一会儿走开再回来；夜里有的开灯
+  function updateFigures(dt) {
+    sc.figures.forEach((f) => {
+      f.phase += dt;
+      f.sway = f.swayOn ? Math.sin(f.phase * 1.7) * 1.6 : 0;
+      if (f.kind === 'civ') {
+        f.timer -= dt;
+        if (f.timer <= 0) {
+          if (f.lift > 0.5 && rand() < 0.45) {
+            f.away = true;
+            f.timer = 1.5 + rand() * 2;
+          } else {
+            f.away = false;
+            if (rand() < 0.5) f.pose = 1 - f.pose;
+            f.timer = 1.5 + rand() * 3;
+          }
+          if (sc.night) f.lit = !f.away && rand() < 0.6;
+        }
+        const target = f.away ? 0 : 1;
+        f.lift += clamp(target - f.lift, -dt * 3, dt * 3);
+      } else if (f.kind === 'decoy') {
+        f.timer -= dt;
+        if (f.timer <= 0) {
+          f.up = !f.up;
+          f.timer = f.up ? 1.2 + rand() * 1.4 : 1.2 + rand() * 2.2;
+        }
+        f.lift += clamp((f.up ? 1 : 0) - f.lift, -dt / RISE_SEC, dt / RISE_SEC);
+      }
+    });
+    sc.flocks.forEach((fl) => {
+      if (fl.state === 'fly' && d.t - fl.t > 1.6) fl.state = 'gone';
+      if (fl.state === 'gone' && d.t - fl.t > cfg.conditions.pigeons.backSec) fl.state = 'sit';
+    });
+  }
+
+  // 掩护关：队友在街上一段段跑，跑的时候他瞄准队友
+  function updateMate(dt) {
+    const m = sc.mate;
+    if (!m || m.done || m.down) return;
+    const E = cfg.escort;
+    if (m.state === 'hide') {
+      m.timer -= dt;
+      if (m.timer <= 0) m.state = 'run';
+    } else {
+      const tx = m.covers[m.next];
+      m.x = Math.min(tx, m.x + E.speed * dt);
+      if (m.x >= tx) {
+        m.next += 1;
+        if (m.next >= m.covers.length) {
+          m.done = true;
+          d.events.push({ kind: 'mateSafe' });
+        } else {
+          m.state = 'hide';
+          m.timer = lerp(E.hideSec[0], E.hideSec[1], rand());
+        }
+      }
+    }
+    if (d.aimingMate()) {
+      m.lock += dt / E.lockSec;
+      if (m.lock >= 1) {
+        m.down = true;
+        d.state = 'mateDown';
+      }
+    } else m.lock = Math.max(0, m.lock - dt * 0.15);
+  }
+
+  function updateFog() {
+    const fogOn = cond === 'fog' || tactic().fog;
+    if (!fogOn) {
+      d.fog = Math.max(0, d.fog - 0.02);
+      return;
+    }
+    const F = cfg.conditions.fog;
+    const cyc = F.thickSec + F.clearSec;
+    const p = d.t % cyc;
+    // 浓 → 淡（中间有 0.8 秒过渡）
+    const target = p < F.thickSec ? 1 : 0.12;
+    d.fog += clamp(target - d.fog, -0.02, 0.02);
   }
 
   d.update = function (dt) {
     d.t += dt;
     if (d.state !== 'play') return;
 
+    d.timeLeft -= dt;
+    if (d.timeLeft <= 0) {
+      d.timeLeft = 0;
+      d.state = 'timeout';
+      return;
+    }
+
+    // 换窗：爬过去的这段时间等于缩着
+    if (d.moving > 0) {
+      d.moving -= dt;
+      if (d.moving <= 0) {
+        d.moving = 0;
+        d.me.c = d.moveTo.c;
+        d.me.r = d.moveTo.r;
+        d.heat = 0;
+        d.lock = 0;
+        d.drawLeft = -1;
+        d.watch = 0;
+        d.peeks = 0;
+        d.moveTo = null;
+        pickTarget();
+      }
+    }
+
     // 缩头 / 起来
-    const want = d.duckHeld || !d.duckBottomed ? 1 : 0;
-    const speed = 2000 / dcfg.blinkMs; // 一下一上 = blinkMs
+    const wasExposed = d.exposed();
+    const want = d.duckHeld || !d.duckBottomed || d.moving > 0 ? 1 : 0;
+    const speed = 2000 / 240; // 一下一上约 0.24 秒
     d.duck = clamp(d.duck + clamp(want - d.duck, -speed * dt, speed * dt), 0, 1);
     if (!d.duckBottomed && d.duck >= 1) {
       d.duckBottomed = true;
       applyChanges();
     }
     if (d.exposed()) d.exposedSec += dt;
+    // 又在同一扇窗露头：他会记住
+    if (!wasExposed && d.exposed()) {
+      d.peeks += 1;
+      if (d.peeks >= cfg.learn.aimAt && d.drawLeft < 0) {
+        d.seek.x = d.seek.tx = d.me.c;
+        d.seek.y = d.seek.ty = d.me.r;
+        d.seek.dwell = 3;
+        d.heat = Math.max(d.heat, 0.9);
+        d.lock = Math.max(d.lock, 0.4);
+        d.events.push({ kind: 'learned' });
+      }
+    }
 
+    updateFog();
+    updateFigures(dt);
     updateEnemy(dt);
     updateSeek(dt);
+    updateMate(dt);
+    if (d.state !== 'play') return;
+    if (Math.floor(d.t * 5) !== Math.floor((d.t - dt) * 5)) {
+      d.seekTrail.push({ x: d.seek.x, y: d.seek.y });
+      if (d.seekTrail.length > 50) d.seekTrail.shift();
+    }
 
     // 他瞄着你：你露着头，倒计时就走；缩头躲开，他盯着你的窗口等你出来
     if (d.drawLeft >= 0) {
@@ -1371,13 +1619,12 @@ function createDuel(opts) {
         d.watch = 0;
         if (d.drawLeft <= 0) {
           if (d.helmets > 0) {
-            // 诱饵头盔：他打飞的是头盔，开枪的火光把他自己照出来了
             d.helmets -= 1;
             d.drawLeft = -1;
             d.lock = 0;
             d.heat = 0.5;
             d.flashSec = 1.6;
-            d.events.push({ kind: 'helmet', t: d.t });
+            d.events.push({ kind: 'helmet' });
           } else {
             d.state = 'dead';
             d.holding = false;
@@ -1387,7 +1634,6 @@ function createDuel(opts) {
       } else {
         d.watch += dt;
         if (d.watch >= WATCH_SEC) {
-          // 等不到你，放弃，接着找
           d.drawLeft = -1;
           d.watch = 0;
           d.lock = 0.3;
@@ -1411,16 +1657,15 @@ function createDuel(opts) {
     if (d.recoverSec > 0 && !d.holding) d.recoverSec = Math.max(0, d.recoverSec - dt);
     if (d.holding) d.holdSec += dt;
 
-    d.phase += (dt * (d.holding ? 0.3 : 1) * Math.PI * 2) / cfg.breath.periodSec;
+    d.breath += (dt * (d.holding ? 0.3 : 1) * Math.PI * 2) / cfg.breath.periodSec;
     const amp = swayAmp();
     const tremor = d.steadiness() === 'tremble' ? Math.sin(d.t * 37) * amp * 0.3 : 0;
-    d.sway.y = amp * Math.sin(d.phase);
-    d.sway.x = amp * 0.35 * Math.sin(d.phase * 2 + 0.7) + tremor;
+    d.sway.y = amp * Math.sin(d.breath);
+    d.sway.x = amp * 0.35 * Math.sin(d.breath * 2 + 0.7) + tremor;
 
-    // 吸附：屏息时准星离他的头够近，镜头被轻轻拉过去（第三场没有）
+    // 吸附：屏息时准星离他的头够近，镜头被轻轻拉过去（后面几关没有）
     if (d.holding && cfg.assist) {
-      const ar = cfg.assist.radius;
-      const radius = Array.isArray(ar) ? ar[Math.min(opts.levelNo, ar.length) - 1] : ar;
+      const radius = cfg.assist.radius[d.levelIndex] || 0;
       const head = scene.enemyHead(sc, 1);
       const dx = head.x - d.cam.x;
       const dy = head.y - d.cam.y;
@@ -1431,20 +1676,141 @@ function createDuel(opts) {
     }
   };
 
-  // 镜片反光：他瞄着你，或者开枪的火光
+  // 镜片反光：他瞄着你、开枪的火光，或者红圈靠近你时一闪一闪（认人的线索）
   d.glint = function () {
-    if (d.state !== 'play') return false;
-    return d.drawLeft >= 0 || d.flashSec > 0;
+    if (d.state !== 'play' && d.state !== 'hit') return false;
+    if (d.drawLeft >= 0 || d.flashSec > 0) return true;
+    if (!d.searching() || d.aimingMate() || !d.enemyExposed()) return false;
+    return d.seekDist() < S.glintCells && (d.t * 1.2) % 1 < 0.3;
+  };
+  // 枪管：他探头找你时露出来
+  d.barrel = function () {
+    return d.searching() && d.enemyExposed();
+  };
+  // 焦躁型：缩着时敲窗台
+  d.tapping = function () {
+    return !!tactic().tap && d.enemy.mode === 'hide' && !d.relocating && d.state === 'play';
   };
 
   d.result = function () {
-    return { win: d.state === 'hit', sec: d.t, blinks: d.blinks, shots: d.shots, exposed: d.exposedSec };
+    return { win: d.state === 'hit', sec: d.t, blinks: d.blinks, shots: d.shots, wasted: d.wasted, lockedOnce: d.lockedOnce };
   };
 
   return d;
 }
 
 module.exports = { createDuel, COLS, ROWS };
+
+});
+__def("js/levels.js", function (module, exports, require) {
+// 第一章 · 网吧赛：8 关 + Boss。一关 = 1~3 个回合（每个回合一个狙击手，中间换点位）。
+// 手工排的顺序：每种新东西第一次出现时单独教（teach 是关前那一页的几句话）。
+//
+// 回合字段：opp 对手（config.opponents）；theme 背景（themes.js）；figures 对面一共几个人影（含狙击手）；
+//   cond 地图条件 fog / night / pigeons；goal 目标 kill / escort；bullets 子弹；time 秒；hitR 判定圈
+// 星星：每关两条附加条件，加上过关一颗
+//   noMiss 一发没浪费；noLock 没被他瞄准过；noRescue 没叫队友拉人；fast 总用时 ≤ fastSec 秒
+
+const STAR_TEXT = {
+  noMiss: '一发子弹都没浪费',
+  noLock: '一次都没被他瞄准',
+  noRescue: '没叫队友拉人',
+  fast: (lv) => lv.fastSec + ' 秒内过关',
+};
+
+const CHAPTERS = [
+  {
+    id: 'cafe',
+    name: '网吧赛',
+    levels: [
+      {
+        id: 'c1', name: '第一枪',
+        teach: [['对面有两个人影，只有一个是狙击手', '他探头找你的时候，镜片会反光'], ['左下点一下 = 缩一下头再起来', '画面会变一处：找出他']],
+        stars: ['noMiss', 'noLock'],
+        rounds: [{ opp: 'patient', theme: 'oldtown', figures: 2, goal: 'kill', bullets: 3, time: 90, hitR: 10 }],
+      },
+      {
+        id: 'c2', name: '谁在闪',
+        teach: [['人多了：四个人影', '下面红圈靠近你时，对面谁在闪，谁就是他'], ['路人会动来动去', '耐心型一动不动']],
+        stars: ['noMiss', 'fast'], fastSec: 50,
+        rounds: [{ opp: 'patient', theme: 'market', figures: 4, goal: 'kill', bullets: 3, time: 80, hitR: 10 }],
+      },
+      {
+        id: 'c3', name: '换个窗',
+        teach: [['同一扇窗露头三次，他就记住了', '点下面那栋楼的另一扇窗 = 爬过去'], ['焦躁型：缩着的时候会敲窗台', '']],
+        stars: ['noLock', 'noRescue'],
+        rounds: [
+          { opp: 'nervous', theme: 'tanks', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 9.5 },
+          { opp: 'nervous', theme: 'tanks', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 9.5 },
+        ],
+      },
+      {
+        id: 'c4', name: '起雾了',
+        teach: [['大雾一阵一阵地散', '浓雾时他也看不清你：趁雾大多看几眼'], ['', '']],
+        stars: ['noMiss', 'noLock'],
+        rounds: [
+          { opp: 'patient', theme: 'port', figures: 4, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 9 },
+          { opp: 'nervous', theme: 'port', figures: 5, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 9 },
+        ],
+      },
+      {
+        id: 'c5', name: '假人',
+        teach: [['狡猾型挑了个头盔当假人', '缩头再起来时，假人不会挪；打中它算打错'], ['打错人扣 8 秒', '']],
+        stars: ['noMiss', 'fast'], fastSec: 110,
+        rounds: [
+          { opp: 'sly', theme: 'station', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 8.5 },
+          { opp: 'sly', theme: 'station', figures: 5, goal: 'kill', bullets: 3, time: 75, hitR: 8.5 },
+        ],
+      },
+      {
+        id: 'c6', name: '掩护小雨',
+        teach: [['小雨要从街上跑过去', '他瞄着小雨时就不在找你：趁这时候打他'], ['小雨被锁定满了就输', '']],
+        stars: ['noLock', 'noRescue'],
+        rounds: [{ opp: 'nervous', theme: 'factory', figures: 4, goal: 'escort', bullets: 3, time: 90, hitR: 8.5 }],
+      },
+      {
+        id: 'c7', name: '鸽子',
+        teach: [['屋顶的鸽子一受惊就飞', '他探头时鸽子飞了：他就在那附近'], ['换位型：被你盯住就换窗', '路过的窗帘会一扇扇动']],
+        stars: ['noMiss', 'noLock'],
+        rounds: [
+          { opp: 'mover', theme: 'desert', figures: 4, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 8 },
+          { opp: 'mover', theme: 'desert', figures: 5, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 8 },
+        ],
+      },
+      {
+        id: 'c8', name: '一枪定胜负',
+        teach: [['夜里只有亮灯的窗看得清', '他不会站在亮灯的窗里：看反光'], ['这一关每回合只有一发子弹', '']],
+        stars: ['noLock', 'fast'], fastSec: 100,
+        rounds: [
+          { opp: 'patient', theme: 'neon', figures: 4, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 8 },
+          { opp: 'sly', theme: 'neon', figures: 5, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 8 },
+        ],
+      },
+      {
+        id: 'c9', name: 'Boss · 老枪', boss: true, needStars: 10,
+        bossIntro: ['网吧里没人赢过他', '三条命：每挨一枪，他换一招'],
+        teach: [['第一段：一动不动', '第二段：被你盯住就换窗'], ['第三段：摆两个假人，还起雾', '每一段子弹重新给三发']],
+        stars: ['noRescue', 'noLock'],
+        rounds: [{ opp: 'boss', theme: 'eaves', figures: 5, goal: 'kill', bullets: 3, time: 120, hitR: 8 }],
+      },
+    ],
+  },
+];
+
+function allLevels() {
+  const out = [];
+  CHAPTERS.forEach((ch) => ch.levels.forEach((lv, i) => out.push(Object.assign({ chapter: ch.id, index: out.length, no: i + 1 }, lv))));
+  return out;
+}
+
+const LEVELS = allLevels();
+
+function starText(lv, key) {
+  const t = STAR_TEXT[key];
+  return typeof t === 'function' ? t(lv) : t;
+}
+
+module.exports = { CHAPTERS, LEVELS, starText };
 
 });
 __def("js/main.js", function (module, exports, require) {
@@ -1480,28 +1846,40 @@ const panelR = { x: L.W / 2 - 150, y: scopeC.y + D / 2 + 12, w: 300, h: Math.min
 const btnY = Math.max(panelR.y + panelR.h + 56, Math.min(L.H - 70, scopeC.y + D / 2 + (L.H - scopeC.y - D / 2) / 2 + 30));
 const eyeBtn = { x: L.W * 0.24, y: btnY, r: 38 };
 const trigBtn = { x: L.W * 0.73, y: btnY, r: 50 };
-const MATCHES = config.matches.length;
+const LV = require('./levels.js');
 
 const G = {
   mode: 'title',
   modeT: 0,
   t: 0,
-  matchNo: 1, // 第几场（1~3），也是难度
-  duelIndex: 0,
+  level: null, // 正在打的关（levels.js）
+  roundIdx: 0,
   attempt: 0,
   duel: null,
   results: [],
-  cards: [], // 这一次网吧赛拿到的临场卡
-  offer: [], // 选卡页上的三张
+  card: null, // 关前带的临场卡
+  pickCard: null, // 带卡页上选中的
   mods: null,
   rescuesLeft: config.rescuesPerLevel,
-  earned: 0, // 这一次网吧赛拿了多少奖金
+  ammoAdsLeft: config.ammoAdsPerLevel,
+  stats: null, // 这一关：浪费几发、被瞄准过没有、拉人几次、用时
+  adFor: 'rescue', // 广告是为了：rescue 拉人 / ammo 扔子弹
+  failReason: '',
+  resultInfo: null,
   buttons: [],
   missFlash: 0,
+  shake: 0,
+  slow: 0, // 慢动作还剩几秒（擦身而过）
+  bossHitT: -1,
   toast: null,
+  say: null,
+  say2: null,
+  sfxT: {}, // 每种连续音效上一次响的时间
   seedBase: Math.floor(Math.random() * 100000),
   title: null, // 开场背景
 };
+
+const FAIL_TEXT = { dead: '他先开枪了', timeout: '时间到了', dry: '子弹打光了', mateDown: '小雨被打中了' };
 
 function setMode(m) {
   G.mode = m;
@@ -1512,74 +1890,68 @@ function toast(text) {
   G.toast = { text, t: 0 };
 }
 
-function match() {
-  return config.matches[G.matchNo - 1];
+function sfx(name, vol) {
+  platform.sound(name, vol);
 }
 
-function themeId(duelIndex) {
-  const ids = match().themes;
-  return ids[Math.min(duelIndex, ids.length - 1)];
+// 一种连续的声音（滴滴、心跳）：隔 gap 秒才响一次
+function sfxEvery(name, gap, vol) {
+  const last = G.sfxT[name] || -99;
+  if (G.t - last >= gap) {
+    G.sfxT[name] = G.t;
+    sfx(name, vol);
+  }
 }
 
-function startDuel() {
+function levelUnlocked(lv) {
+  const S = team.state();
+  if (lv.index === 0) return true;
+  const prev = LV.LEVELS[lv.index - 1];
+  if (S.cleared.indexOf(prev.id) < 0) return false;
+  if (lv.needStars && team.totalStars() < lv.needStars) return false;
+  return true;
+}
+
+function startRound() {
   G.duel = createDuel({
-    seed: G.seedBase + G.matchNo * 1009 + G.duelIndex * 37 + G.attempt * 7919,
-    levelNo: G.matchNo,
-    duelIndex: G.duelIndex,
+    seed: G.seedBase + G.roundIdx * 37 + G.attempt * 7919,
     config,
     scopeD: D,
-    theme: themeId(G.duelIndex),
+    round: G.level.rounds[G.roundIdx],
+    levelIndex: G.level.index,
     mods: G.mods,
   });
 }
 
-// 一场比赛：三个对手。打输了重打这一场，手里的卡留着。
-function startMatch() {
-  G.seedBase = Math.floor(Math.random() * 100000); // 以后好友挑战改成固定 seed
-  G.duelIndex = 0;
+function openLevel(lv) {
+  if (!levelUnlocked(lv)) {
+    toast(lv.needStars && team.totalStars() < lv.needStars ? '要攒够 ' + lv.needStars + ' 颗星' : '先过前一关');
+    return;
+  }
+  G.level = lv;
+  const cards = team.unlockedCards();
+  if (!G.pickCard || !cards.some((c) => c.id === G.pickCard)) G.pickCard = cards.length ? cards[0].id : null;
+  setMode('loadout');
+}
+
+function startLevel() {
+  G.card = G.pickCard;
+  G.mods = team.mods(G.card ? [G.card] : []);
+  G.rescuesLeft = config.rescuesPerLevel + G.mods.rescueAdd;
+  G.ammoAdsLeft = config.ammoAdsPerLevel;
+  G.seedBase = Math.floor(Math.random() * 100000); // 以后每日挑战改成固定 seed
+  G.roundIdx = 0;
   G.attempt = 0;
   G.results = [];
-  G.mods = team.mods(G.cards);
-  G.rescuesLeft = config.rescuesPerLevel + G.mods.rescueAdd;
-  startDuel();
-  setMode(config.storyEnabled ? 'story' : 'intro');
+  G.stats = { wasted: 0, locked: false, rescued: 0, sec: 0 };
+  startRound();
+  const S = team.state();
+  if (G.level.boss && S.cleared.indexOf(G.level.id) < 0) setMode('bossIntro');
+  else setMode('teach');
 }
 
-// 一次网吧赛：三场。
-function startRun() {
-  G.matchNo = 1;
-  G.cards = [];
-  G.earned = 0;
-  startMatch();
-}
-
-// 第一次打第一场：先讲一遍怎么玩
-function needHowto() {
-  return !G.howtoSeen && G.matchNo === 1 && G.duelIndex === 0;
-}
-
-function drawHowto() {
-  const ctx = P.ctx;
-  ctx.fillStyle = 'rgba(10,6,18,0.82)';
-  ctx.fillRect(0, 0, scopeC.x * 2, scopeC.y + D / 2 + 4);
-  comicText(ctx, '谁先暴露谁死', L.W / 2, 110, 32);
-  const lines = [
-    ['左下按住 = 缩头', '躲在墙后最安全，但什么都看不见'],
-    ['点一下 = 缩一下再起来', '画面会变一处：找出他'],
-    ['下面这栋楼是你，红圈是他的镜子', '红圈停在你窗口上会锁定你 → 快缩头'],
-    ['红圈在动 = 他探着头在找你', '这也是你唯一打得中他的时候'],
-    ['打空一枪，他马上知道你在哪', ''],
-  ];
-  lines.forEach(([a, b], i) => {
-    const k = clamp((G.modeT - 0.3 - i * 0.5) / 0.3, 0, 1);
-    if (k <= 0) return;
-    ctx.save();
-    ctx.globalAlpha = k;
-    text(a, L.W / 2, 160 + i * 52, 15, '#ffd23f', 'center', 900);
-    if (b) text(b, L.W / 2, 160 + i * 52 + 20, 12, '#f4f1de', 'center', 600);
-    ctx.restore();
-  });
-  if (G.modeT > 2.8) text('点一下开始', L.W / 2, scopeC.y + D / 2 - 14, 12, 'rgba(244,241,222,0.7)');
+function goMap() {
+  setMode('map');
 }
 
 function startClassic() {
@@ -1590,7 +1962,7 @@ function startClassic() {
 function goTitle() {
   const ids = themes.ORDER;
   const id = ids[Math.floor(Math.random() * ids.length)];
-  G.title = { sc: scene.build(Math.floor(Math.random() * 99999), config.duels[0], D, id) };
+  G.title = { sc: scene.build(Math.floor(Math.random() * 99999), { poseShift: 3, contrast: 0.2 }, D, id) };
   setMode('title');
 }
 
@@ -1599,7 +1971,20 @@ function inCircle(b, x, y) {
   return Math.hypot(x - b.x, y - b.y) <= b.r + 8;
 }
 
-const TAP_TO_SKIP = { howto: 0.6, story: 0.3, intro: 0.3, clear: 1.0, reveal: 1.0, move: 0.6 };
+const TAP_TO_SKIP = { bossIntro: 0.5, teach: 0.6, intro: 0.3, reveal: 1.0, move: 0.6, hit: 0.5, ammoGift: 0.4 };
+
+// 下面那栋楼的小图上点了哪扇窗
+function panelCell(x, y) {
+  const p = panelR;
+  const d = G.duel;
+  if (x < p.x || x > p.x + p.w || y < p.y || y > p.y + p.h) return null;
+  const cw = (p.w - 20) / d.COLS;
+  const ch = (p.h - 22) / d.ROWS;
+  const c = Math.floor((x - p.x - 10) / cw);
+  const r = Math.floor((y - p.y - 16) / ch);
+  if (c < 0 || c >= d.COLS || r < 0 || r >= d.ROWS) return null;
+  return { c, r };
+}
 
 function onTouch(type, id, sx, sy) {
   const x = sx / scale;
@@ -1621,11 +2006,17 @@ function onTouch(type, id, sx, sy) {
       const c = G.classic;
       if (c.state !== 'play') return;
       if (inCircle(eyeBtn, x, y)) { c.toggle(); touches[id] = { role: 'ui' }; }
-      else if (inCircle(trigBtn, x, y)) { c.fire(); platform.vibrate(true); touches[id] = { role: 'ui' }; }
+      else if (inCircle(trigBtn, x, y)) { c.fire(); sfx(c.wide ? 'wrong' : 'shot'); platform.vibrate(true); touches[id] = { role: 'ui' }; }
       else if (Math.hypot(x - scopeC.x, y - scopeC.y) < D / 2 + 30) touches[id] = { role: 'cpan', x, y };
       return;
     }
     if (G.mode !== 'play') return;
+    const cell = panelCell(x, y);
+    if (cell) {
+      touches[id] = { role: 'ui' };
+      if (!G.duel.moveWindow(cell.c, cell.r) && G.duel.moving <= 0 && cell.c === G.duel.me.c && cell.r === G.duel.me.r) toast('点别的窗 = 爬过去');
+      return;
+    }
     if (inCircle(eyeBtn, x, y)) {
       touches[id] = { role: 'duck' };
       G.duel.duckDown();
@@ -1665,102 +2056,182 @@ function onTouch(type, id, sx, sy) {
 // 点一下跳过过场
 function skipAhead() {
   const m = G.mode;
-  if (m === 'story') setMode(needHowto() ? 'howto' : 'intro');
-  else if (m === 'howto') { G.howtoSeen = true; setMode('intro'); }
+  if (m === 'bossIntro') setMode('teach');
+  else if (m === 'teach') setMode('intro');
   else if (m === 'intro') setMode('play');
-  else if (m === 'move') afterMove();
-  else if (m === 'clear') afterClear();
+  else if (m === 'move') setMode('intro');
+  else if (m === 'hit') afterHit();
+  else if (m === 'ammoGift') giveAmmo();
   else if (m === 'reveal' && G.modeT < cut.REVEAL_SEC - 1.2) G.modeT = cut.REVEAL_SEC - 1.2;
 }
 
 // —— 规则推进 ——
+function addStats(d) {
+  G.stats.wasted += d.wasted;
+  G.stats.locked = G.stats.locked || d.lockedOnce;
+  G.stats.sec += d.t;
+}
+
 function afterHit() {
-  G.results.push(G.duel.result());
-  G.earned += team.earn('perKill');
+  const d = G.duel;
+  addStats(d);
+  G.results.push(d.result());
   G.attempt = 0;
-  if (G.duelIndex + 1 < config.duelsPerLevel) {
-    G.duelIndex += 1;
-    startDuel(); // 下一个点位先建好，换位置动画用它的天色
+  if (G.roundIdx + 1 < G.level.rounds.length) {
+    G.roundIdx += 1;
+    startRound(); // 下一个点位先建好，换位置动画用它的天色
     setMode('move');
-  } else {
-    G.earned += team.earn('perMatch');
-    setMode('clear');
+  } else finishLevel();
+}
+
+function finishLevel() {
+  const lv = G.level;
+  const st = G.stats;
+  const check = {
+    noMiss: st.wasted === 0,
+    noLock: !st.locked,
+    noRescue: st.rescued === 0,
+    fast: st.sec <= (lv.fastSec || 999),
+  };
+  const conds = lv.stars.map((k) => check[k]);
+  const stars = 1 + conds.filter(Boolean).length;
+  const rec = team.recordLevel(lv.id, stars);
+  const money = team.earn('perRound', lv.rounds.length) + team.earn('perStar', rec.newStars);
+  const S = team.state();
+  const reveal = lv.boss && !S.revealed;
+  if (reveal) team.reveal();
+  G.resultInfo = { stars, conds, first: rec.first, money, sec: st.sec, reveal, cardUnlocked: rec.first ? team.unlockedCards().slice(-1)[0] : null };
+  sfx('win');
+  setMode('result');
+}
+
+function fail(reason) {
+  if (G.duel) addStats(G.duel);
+  G.failReason = reason;
+  sfx('lose');
+  platform.vibrate(true);
+  setMode('fail');
+}
+
+function giveAmmo() {
+  const d = G.duel;
+  d.bullets = 1;
+  d.state = 'play';
+  setMode('play');
+}
+
+// 对狙里发生的事 → 声音、字、震屏
+function handleEvents(d) {
+  while (d.events.length) {
+    const ev = d.events.shift();
+    if (ev.kind === 'duck') sfx('duck', 0.35);
+    else if (ev.kind === 'crawl') sfx('crawl', 0.5);
+    else if (ev.kind === 'shot') {
+      sfx('shot');
+      if (ev.result === 'wrong' || ev.result === 'decoy') { sfx('wrong'); G.shake = 0.35; }
+      else if (ev.result === 'close') { G.slow = 0.5; G.say = { text: '好险！', color: '#ffd23f', t: 0.9 }; }
+      else if (ev.result !== 'hit') G.shake = 0.25;
+    } else if (ev.kind === 'spotted') G.say2 = { text: '枪口火光：他知道你在哪了', t: 1.3 };
+    else if (ev.kind === 'aimed') { sfx('glint', 0.6); platform.vibrate(true); }
+    else if (ev.kind === 'helmet') {
+      sfx('enemyShot');
+      platform.vibrate(true);
+      G.say = { text: '头盔被打飞！他在那儿！', color: '#ffd23f', t: 1.8 };
+    } else if (ev.kind === 'learned') { sfx('tick'); G.say = { text: '他记住这扇窗了！', color: '#ff8a00', t: 1.4 }; }
+    else if (ev.kind === 'wings') sfx('wings', 0.5);
+    else if (ev.kind === 'bossHit') {
+      sfx('boom');
+      G.shake = 0.4;
+      G.bossHitT = 0;
+      G.say = { text: ev.hp === 1 ? '最后一条命！' : '还没完！', color: '#ff4d5e', t: 1.6 };
+    } else if (ev.kind === 'mateSafe') { sfx('coin'); G.say = { text: '小雨安全了！', color: '#90ee90', t: 1.4 }; }
   }
 }
 
-function afterMove() {
-  setMode('intro');
-}
-
-function afterClear() {
-  if (G.matchNo < MATCHES) {
-    G.offer = team.drawCards(G.cards, rng(G.seedBase + 3));
-    setMode('pick');
-  } else {
-    G.earned += team.earn('perCup');
-    if (!team.state().revealed) {
-      team.reveal();
-      setMode('reveal');
-    } else setMode('champ');
+// 连续的声音：红圈靠近滴滴、锁定圈转、心跳
+function ambientSound(d) {
+  if (d.state !== 'play') return;
+  if (d.searching() && !d.aimingMate() && d.exposed()) {
+    const dist = d.seekDist();
+    if (d.lock > 0) sfxEvery('tick', 0.14, 0.5);
+    else if (dist < 2.2) sfxEvery('beep', 0.25 + dist * 0.25, 0.35);
   }
-}
-
-function pickCard(id) {
-  G.cards.push(id);
-  G.matchNo += 1;
-  startMatch();
+  if (d.heart > 1.25) sfxEvery('heart', 0.95 / d.heart, 0.5);
+  const g = d.glint();
+  if (g && !G.wasGlint) sfx('glint', 0.25);
+  G.wasGlint = g;
 }
 
 function update(dt) {
   G.t += dt;
   G.modeT += dt;
   G.missFlash = Math.max(0, G.missFlash - dt);
+  G.shake = Math.max(0, G.shake - dt);
   if (G.toast) {
     G.toast.t += dt;
     if (G.toast.t > 2.2) G.toast = null;
   }
+  if (G.say) { G.say.t -= dt; if (G.say.t <= 0) G.say = null; }
+  if (G.say2) { G.say2.t -= dt; if (G.say2.t <= 0) G.say2 = null; }
+  if (G.bossHitT >= 0) { G.bossHitT += dt; if (G.bossHitT > 1.2) G.bossHitT = -1; }
   const d = G.duel;
   const m = G.mode;
-  if (m === 'story' && G.modeT > 1.8) setMode(needHowto() ? 'howto' : 'intro');
-  else if (m === 'howto' && G.modeT > 9) { G.howtoSeen = true; setMode('intro'); }
+  if (m === 'bossIntro' && G.modeT > 4) setMode('teach');
   else if (m === 'intro' && G.modeT > 1.4) setMode('play');
   else if (m === 'play') {
-    d.update(dt);
-    while (d.events.length) {
-      const ev = d.events.shift();
-      if (ev.kind === 'helmet') {
-        platform.vibrate(true);
-        G.say = { text: '头盔被打飞！他在那儿！', color: '#ffd23f', t: 1.8 };
-      } else if (ev.kind === 'spotted') G.say2 = { text: '暴露了！快缩头', t: 1.2 };
-    }
-    if (G.say) { G.say.t -= dt; if (G.say.t <= 0) G.say = null; }
-    if (G.say2) { G.say2.t -= dt; if (G.say2.t <= 0) G.say2 = null; }
-    if (d.drawLeft >= 0 && Math.floor(d.t * 6) !== Math.floor((d.t - dt) * 6)) platform.vibrate(false);
-    if (d.state === 'hit') setMode('hit');
+    // 擦身而过：慢动作
+    let k = 1;
+    if (G.slow > 0) { G.slow -= dt; k = 0.3; }
+    d.update(dt * k);
+    handleEvents(d);
+    ambientSound(d);
+    if (d.drawLeft >= 0 && d.exposed() && Math.floor(d.t * 6) !== Math.floor((d.t - dt) * 6)) platform.vibrate(false);
+    if (d.state === 'hit') { sfx('boom'); setMode('hit'); }
     else if (d.state === 'dead') {
       platform.vibrate(true);
-      setMode(G.rescuesLeft > 0 ? 'dead' : 'fail');
-    }
+      sfx('enemyShot');
+      if (G.rescuesLeft > 0) { G.adFor = 'rescue'; setMode('dead'); } else fail('dead');
+    } else if (d.state === 'dry') {
+      if (G.ammoAdsLeft > 0) { G.adFor = 'ammo'; setMode('dry'); } else fail('dry');
+    } else if (d.state === 'timeout') fail('timeout');
+    else if (d.state === 'mateDown') fail('mateDown');
   } else if (m === 'hit') {
     d.update(dt);
-    if (G.modeT > 1.6) afterHit();
-  } else if (m === 'move' && G.modeT > cut.RELOCATE_SEC) afterMove();
-  else if (m === 'clear' && G.modeT > cut.CLEAR_SEC) afterClear();
-  else if (m === 'ad' && G.modeT > config.fakeAdSec) setMode('rescue');
+    if (G.modeT > 1.5) afterHit();
+  } else if (m === 'move' && G.modeT > cut.RELOCATE_SEC) setMode('intro');
+  else if (m === 'ad' && G.modeT > config.fakeAdSec) adDone();
+  else if (m === 'ammoGift' && G.modeT > 1.4) giveAmmo();
   else if (m === 'classic') G.classic.update(dt);
   else if (m === 'rescue' && G.modeT > cut.RESCUE_SEC) {
+    addStats(G.duel);
     G.rescuesLeft -= 1;
+    G.stats.rescued += 1;
     G.attempt += 1;
-    startDuel(); // 拉起来以后重打这一个，对面换个地方藏
+    startRound(); // 拉起来以后重打这个回合，对面换个地方藏
     setMode('play');
+  }
+  // 结算页：星星和金币的声音
+  if (m === 'result' && G.resultInfo) {
+    [0.6, 1.0, 1.4].forEach((at, i) => {
+      if (i < G.resultInfo.stars && G.modeT >= at && G.modeT - dt < at) sfx('star');
+    });
+    if (G.modeT >= 1.9 && G.modeT - dt < 1.9) sfx('coin');
   }
 }
 
-function callTeammate() {
+function adDone() {
+  if (G.adFor === 'ammo') {
+    G.ammoAdsLeft -= 1;
+    setMode('ammoGift');
+  } else setMode('rescue');
+}
+
+function callTeammate(forWhat) {
+  G.adFor = forWhat;
   const real = platform.showRewardedAd(
     config.rewardedAdUnitId,
-    () => setMode('rescue'),
-    () => setMode('fail')
+    adDone,
+    () => fail(forWhat === 'ammo' ? 'dry' : 'dead')
   );
   if (!real) setMode('ad');
   else setMode('adWait');
@@ -1777,6 +2248,9 @@ function drawScope(opt) {
   const cam = opt.cam || d.cam;
   scene.draw(ctx, d.sc, cam, scopeC.x, scopeC.y, D, {
     glint: d.glint(),
+    barrel: d.barrel(),
+    tap: d.tapping(),
+    fog: d.fog,
     enemyDrop: opt.enemyDrop || 0,
     t: G.t,
   });
@@ -1841,6 +2315,7 @@ function drawScope(opt) {
 
   // 缩头：掩体（沙袋墙）从下往上盖住镜子
   if (d.duck > 0) drawCover(ctx, d.duck);
+  if (d.moving > 0) comicText(ctx, '爬向另一扇窗……', scopeC.x, scopeC.y, 20, '#f4f1de');
   if (opt.tint) {
     ctx.fillStyle = opt.tint;
     ctx.fillRect(scopeC.x - D / 2, scopeC.y - D / 2, D, D);
@@ -1918,35 +2393,35 @@ function drawHud() {
   const ctx = P.ctx;
   const d = G.duel;
 
-  // 左上：第几场、这一场第几个对手
-  ctx.fillStyle = '#f4f1de';
-  ctx.font = '800 12px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('第 ' + G.matchNo + ' 场', 16, 20);
-  for (let i = 0; i < config.duelsPerLevel; i++) {
-    const px = 24 + i * 22;
-    ctx.beginPath();
-    ctx.arc(px, 42, 7, 0, Math.PI * 2);
-    ctx.fillStyle = i < G.results.length ? '#ffd23f' : i === G.duelIndex ? '#f4f1de' : '#4a4060';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = INK;
-    ctx.stroke();
+  // 左上：第几关、第几回合、子弹
+  const lv = G.level;
+  text('第 ' + lv.no + ' 关 · ' + lv.name, 14, 18, 12, '#f4f1de', 'left', 800);
+  if (lv.rounds.length > 1) text('回合 ' + (G.roundIdx + 1) + ' / ' + lv.rounds.length, 14, 36, 11, '#c9c2e0', 'left', 700);
+  const bulletsMax = d.round.bullets || 3;
+  for (let i = 0; i < bulletsMax; i++) drawBullet(ctx, 18 + i * 14, lv.rounds.length > 1 ? 54 : 40, i < d.bullets);
+  // Boss 的命
+  if (d.bossHp > 0 && d.opp.phases) {
+    for (let i = 0; i < d.opp.phases.length; i++) drawHeart(ctx, 26 + i * 20, 76, i < d.bossHp ? 7 : 4);
   }
 
-  // 右上：手里的临场卡
-  G.cards.forEach((id, i) => {
-    const c = team.CARDS.find((x) => x.id === id);
-    const cx = L.W - 22 - i * 30;
-    roundRect(ctx, cx - 12, 28, 24, 30, 4);
+  // 正中上方：倒计时
+  const tl = Math.ceil(d.timeLeft);
+  comicText(ctx, String(tl), L.W / 2, 34, tl <= 15 ? 30 + Math.sin(G.t * 12) * 2 : 26, tl <= 15 ? '#ff4d5e' : '#f4f1de');
+
+  // 右上：带的临场卡
+  if (G.card) {
+    const c = team.CARDS.find((x) => x.id === G.card);
+    const cx = L.W - 24;
+    roundRect(ctx, cx - 13, 18, 26, 32, 4);
     ctx.fillStyle = '#f2d8a7';
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = INK;
     ctx.stroke();
-    cut.cardIcon(ctx, c.icon, cx, 43, 0.42);
-  });
+    cut.cardIcon(ctx, c.icon, cx, 34, 0.44);
+  }
+  // 地图条件
+  if (d.cond) text(config.conditions[d.cond].name, L.W - 46, 34, 11, '#c9c2e0', 'right', 800);
 
   // 观察手（或耳机卡）：他探头时，在镜子边上指他的方向
   if (d.mods.peekCue && d.searching() && d.drawLeft < 0) {
@@ -2008,17 +2483,60 @@ function drawHud() {
   const beat = Math.pow(Math.max(0, Math.sin(d.t * Math.PI * 2 * (1.1 * d.heart))), 8);
   drawHeart(ctx, trigBtn.x - trigBtn.r - 6, trigBtn.y - trigBtn.r + 2, 9 + beat * 3);
 
-  if (G.matchNo === 1 && G.duelIndex === 0 && G.mode === 'play') {
+  if (G.level.index === 0 && G.mode === 'play') {
     if (d.blinks < 3) pulse(ctx, eyeBtn);
     else if (d.shots === 0 && !d.holding) pulse(ctx, trigBtn);
   }
+  // 第 3 关教换窗：他记住你以后，下面那栋楼一闪一闪
+  if (G.mode === 'play' && d.peeks >= config.learn.warnAt && d.moving <= 0) {
+    const k = (G.t * 1.4) % 1;
+    roundRect(ctx, panelR.x - 4 - k * 6, panelR.y - 4 - k * 6, panelR.w + 8 + k * 12, panelR.h + 8 + k * 12, 10);
+    ctx.strokeStyle = 'rgba(255,138,0,' + (1 - k).toFixed(2) + ')';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  // 掩护关：小雨的状态
+  const mate = d.sc.mate;
+  if (mate && G.mode === 'play') {
+    const mx = L.W / 2 - 60;
+    const my = panelR.y + panelR.h + 10;
+    text(mate.done ? '小雨安全了' : mate.down ? '' : d.aimingMate() ? '他在瞄小雨！' : '小雨' + (mate.state === 'run' ? '在跑' : '躲着'), mx - 6, my + 5, 11, d.aimingMate() ? '#ff4d5e' : '#90ee90', 'right', 800);
+    roundRect(ctx, mx, my, 120, 10, 5);
+    ctx.fillStyle = '#2b2438';
+    ctx.fill();
+    roundRect(ctx, mx, my, 120 * (mate.done ? 1 : mate.next / mate.covers.length), 10, 5);
+    ctx.fillStyle = '#2e86ab';
+    ctx.fill();
+    if (mate.lock > 0 && !mate.done) {
+      roundRect(ctx, mx, my + 13, 120 * mate.lock, 5, 2);
+      ctx.fillStyle = '#ff4d5e';
+      ctx.fill();
+    }
+  }
 
   if (G.missFlash > 0 && G.lastShot) {
-    const words = { covered: '他缩着！', close: '差一点！', miss: '偏了！', decoy: '是假人！' };
+    const words = { covered: '他缩着！', close: '差一点！', miss: '偏了！', decoy: '是假人！-8秒', wrong: '打错人！-8秒' };
     comicText(ctx, words[G.lastShot.kind] || '偏了！', scopeC.x, scopeC.y + D / 2 - 44, 28, G.lastShot.kind === 'close' ? '#ffd23f' : '#ff4d5e');
     if (!d.mods.silent) comicText(ctx, '枪口火光：他看见你了', scopeC.x, scopeC.y + D / 2 - 16, 14, '#f4f1de');
   }
   if (G.say && G.mode === 'play') comicText(ctx, G.say.text, scopeC.x, scopeC.y + 40, 22, G.say.color);
+  // Boss 挨了一枪：头盔飞出去
+  if (G.bossHitT >= 0 && d.hitAt) {
+    const k = G.bossHitT;
+    const hx = scopeC.x + d.hitAt.x - d.cam.x + k * 90;
+    const hy = scopeC.y + d.hitAt.y - d.cam.y - k * 120 + k * k * 160;
+    ctx.save();
+    ctx.translate(hx, hy);
+    ctx.rotate(k * 8);
+    ctx.fillStyle = '#6b7f4a';
+    ctx.beginPath();
+    ctx.arc(0, 0, 12, Math.PI, 0);
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    ctx.restore();
+  }
   if (G.say2 && G.mode === 'play' && !G.missFlash) comicText(ctx, G.say2.text, scopeC.x, scopeC.y + D / 2 - 30, 18, '#ff4d5e');
 }
 
@@ -2040,14 +2558,20 @@ function drawPanel(ctx, d) {
   ctx.font = '700 10px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  const label = aiming ? '他瞄着你！' : d.searching() ? '你这栋楼 · 他在找你' : '你这栋楼 · 他缩着，没在看';
+  const label = aiming ? '他瞄着你！' : d.aimingMate() ? '他在瞄小雨，没看你' : d.searching() ? '你这栋楼 · 他在找你（点别的窗 = 换窗）' : '你这栋楼 · 他缩着，没在看';
   ctx.fillText(label, p.x + 10, p.y + 9);
   // 窗户
   for (let r = 0; r < d.ROWS; r++) {
     for (let c = 0; c < d.COLS; c++) {
-      const me = c === d.me.c && r === d.me.r;
+      const me = c === d.me.c && r === d.me.r && d.moving <= 0;
       ctx.fillStyle = me ? (d.exposed() ? '#ffd23f' : '#8a7350') : '#1a1428';
       ctx.fillRect(cx(c) - cw * 0.28, cy(r) - ch * 0.32, cw * 0.56, ch * 0.64);
+      // 他记住这扇窗了：橙色框
+      if (me && d.peeks >= config.learn.warnAt) {
+        ctx.strokeStyle = '#ff8a00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(cx(c) - cw * 0.34, cy(r) - ch * 0.4, cw * 0.68, ch * 0.8);
+      }
       if (me && d.exposed()) {
         ctx.fillStyle = INK;
         ctx.beginPath();
@@ -2055,6 +2579,24 @@ function drawPanel(ctx, d) {
         ctx.fill();
       }
     }
+  }
+  // 正在爬向另一扇窗
+  if (d.moving > 0 && d.moveTo) {
+    const k = 1 - d.moving / config.move.sec;
+    const fx = lerp(cx(d.moveTo.from.c), cx(d.moveTo.c), k);
+    const fy = lerp(cy(d.moveTo.from.r), cy(d.moveTo.r), k);
+    ctx.strokeStyle = '#ffd23f';
+    ctx.setLineDash && ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx(d.moveTo.from.c), cy(d.moveTo.from.r));
+    ctx.lineTo(cx(d.moveTo.c), cy(d.moveTo.r));
+    ctx.stroke();
+    ctx.setLineDash && ctx.setLineDash([]);
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath();
+    ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+    ctx.fill();
   }
   // 锁定圈：转满他就瞄准你
   if (d.lock > 0) {
@@ -2068,7 +2610,9 @@ function drawPanel(ctx, d) {
   const sx = cx(d.seek.x);
   const sy = cy(d.seek.y);
   const rr = Math.min(cw, ch) * 0.75;
-  if (d.searching() || aiming) {
+  if (d.aimingMate()) {
+    // 他瞄着街上的小雨：红圈不在你楼上
+  } else if (d.searching() || aiming) {
     ctx.strokeStyle = '#ff4d5e';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
@@ -2085,6 +2629,20 @@ function drawPanel(ctx, d) {
     ctx.arc(sx, sy, rr, 0, Math.PI * 2);
     ctx.stroke();
   }
+}
+
+function drawBullet(ctx, x, y, full) {
+  ctx.fillStyle = full ? '#ffd23f' : '#3a3150';
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y + 7);
+  ctx.lineTo(x - 4, y - 3);
+  ctx.quadraticCurveTo(x, y - 12, x + 4, y - 3);
+  ctx.lineTo(x + 4, y + 7);
+  ctx.closePath();
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
 }
 
 function drawDuckIcon(ctx, x, y, k) {
@@ -2190,33 +2748,107 @@ function comicPanel(title, sub, sub2) {
   ctx.restore();
 }
 
+// 打中：三格漫画子弹时间。嘣 → 子弹慢慢飞过去 → 头盔飞了、眼冒金星、「爆头！」
 function drawHit() {
   const ctx = P.ctx;
   const d = G.duel;
   const t = G.modeT;
   const aimX = scopeC.x + (d.hitAt.x - d.cam.x);
   const aimY = scopeC.y + (d.hitAt.y - d.cam.y);
-  drawScope({ enemyDrop: t > 0.45 ? easeOut(clamp((t - 0.45) / 0.5, 0, 1)) * 14 : 0, noCross: true });
-  if (t < 0.9) drawCrosshair(ctx, aimX, aimY, 'steady');
-  if (t < 0.45) {
-    const k = t / 0.45;
+  drawScope({ enemyDrop: t > 0.75 ? easeOut(clamp((t - 0.75) / 0.4, 0, 1)) * 14 : 0, noCross: true });
+  if (t < 0.25) {
+    // 第一格：嘣
+    ctx.fillStyle = 'rgba(255,250,220,' + (0.8 * (1 - t / 0.25)).toFixed(2) + ')';
+    ctx.fillRect(0, 0, L.W, L.H);
+    starburst(ctx, scopeC.x, scopeC.y + D / 2 - 30, 70, 44, 12, '#ffd23f');
+    comicText(ctx, '嘣！', scopeC.x, scopeC.y + D / 2 - 30, 40);
+  } else if (t < 0.75) {
+    // 第二格：子弹慢慢飞过去（速度线）
+    const k = (t - 0.25) / 0.5;
     const sx = scopeC.x;
     const sy = scopeC.y + D / 2;
+    const bx = sx + (aimX - sx) * k;
+    const by = sy + (aimY - sy) * k;
     ctx.strokeStyle = 'rgba(255,240,200,0.9)';
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(sx, sy);
-    ctx.lineTo(sx + (aimX - sx) * k, sy + (aimY - sy) * k);
+    ctx.lineTo(bx, by);
     ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      const a = Math.atan2(aimY - sy, aimX - sx) + Math.PI + (i - 2.5) * 0.15;
+      ctx.beginPath();
+      ctx.moveTo(bx + Math.cos(a) * 10, by + Math.sin(a) * 10);
+      ctx.lineTo(bx + Math.cos(a) * 40, by + Math.sin(a) * 40);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#ffe14f';
+    ctx.beginPath();
+    ctx.arc(bx, by, 4, 0, Math.PI * 2);
+    ctx.fill();
+    drawCrosshair(ctx, aimX, aimY, 'steady');
   } else {
-    const k = easeOut(clamp((t - 0.45) / 0.2, 0, 1));
-    starburst(ctx, aimX, aimY, 70 * k, 42 * k, 12, '#ff4d5e');
-    comicText(ctx, '嘣！', aimX, aimY, 44 * k);
-    comicText(ctx, '爆头', aimX, aimY + 52, 18 * k, '#f4f1de');
-    if (t > 0.8) comicText(ctx, '+¥' + Math.round(config.money.perKill * team.BASES[team.state().base].mul), L.W / 2, scopeC.y + D / 2 + 26, 20, '#90ee90');
+    // 第三格：一格漫画框放大他的头：头盔飞了，眼冒金星
+    const k = easeOut(clamp((t - 0.75) / 0.2, 0, 1));
+    const px = L.W / 2;
+    const py = scopeC.y - 20;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(-0.06);
+    ctx.scale(k, k);
+    roundRect(ctx, -110, -80, 220, 160, 8);
+    ctx.fillStyle = '#f2d8a7';
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.rect(-106, -76, 212, 152);
+    ctx.clip();
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      ctx.strokeStyle = 'rgba(200,80,60,0.3)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 30, Math.sin(a) * 30);
+      ctx.lineTo(Math.cos(a) * 160, Math.sin(a) * 160);
+      ctx.stroke();
+    }
+    const tt = t - 0.75;
+    ctx.fillStyle = '#4a3a5a';
+    ctx.beginPath();
+    ctx.arc(0, 10 + tt * 30, 28, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-45, 36 + tt * 30, 90, 60);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    // 头盔飞走
+    ctx.save();
+    ctx.translate(tt * 160, -20 - tt * 140 + tt * tt * 120);
+    ctx.rotate(tt * 9);
+    ctx.fillStyle = '#6b7f4a';
+    ctx.beginPath();
+    ctx.arc(0, 0, 30, Math.PI, 0);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+    // 金星
+    for (let i = 0; i < 3; i++) {
+      const a = tt * 8 + (i * Math.PI * 2) / 3;
+      starburst(ctx, Math.cos(a) * 34, -18 + tt * 30 + Math.sin(a) * 10, 9, 4, 5, '#ffd23f');
+    }
+    ctx.restore();
+    const kk = easeOut(clamp((t - 0.85) / 0.2, 0, 1));
+    starburst(ctx, px + 70, py + 70, 50 * kk, 32 * kk, 12, '#ff4d5e');
+    comicText(ctx, '爆头！', px + 70, py + 70, 28 * kk);
+    if (t > 1.0) comicText(ctx, '点一下继续', L.W / 2, scopeC.y + D / 2 + 26, 12, 'rgba(244,241,222,0.7)');
   }
 }
 
+// 输了：他在哪 + 回放他的红圈是怎么找到你的
 function drawFail() {
   const ctx = P.ctx;
   const d = G.duel;
@@ -2231,9 +2863,249 @@ function drawFail() {
   ctx.arc(ex, ey + 4, 22 + Math.sin(G.modeT * 6) * 3, 0, Math.PI * 2);
   ctx.stroke();
   comicText(ctx, '他在这儿！', ex, ey - 40, 22, '#ffffff');
-  comicText(ctx, '差一点！', L.W / 2, scopeC.y + D / 2 + 40, 40);
-  button('retry', '重打这一场', L.W / 2 - 100, L.H - 150, 200, 54, () => startMatch(), true);
-  button('home', '回主页', L.W / 2 - 60, L.H - 84, 120, 42, goTitle);
+  comicText(ctx, FAIL_TEXT[G.failReason] || '差一点！', L.W / 2, 34, 30, '#ff4d5e');
+  // 回放：红圈走过的路
+  drawPanel(ctx, d);
+  const trail = d.seekTrail;
+  if (trail.length > 1) {
+    const p = panelR;
+    const cw = (p.w - 20) / d.COLS;
+    const ch = (p.h - 22) / d.ROWS;
+    const n = Math.max(2, Math.floor(trail.length * clamp(G.modeT / 2.2, 0, 1)));
+    ctx.strokeStyle = 'rgba(255,77,94,0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    trail.slice(0, n).forEach((pt, i) => {
+      const x = p.x + 10 + cw * (pt.x + 0.5);
+      const y = p.y + 16 + ch * (pt.y + 0.5);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    text('他的镜子是这样找到你的', p.x + p.w / 2, p.y + p.h + 12, 11, '#c9c2e0', 'center', 700);
+  }
+  button('retry', '再来一次', L.W / 2 - 160, L.H - 84, 150, 50, startLevel, true);
+  button('map', '回地图', L.W / 2 + 10, L.H - 84, 150, 50, goMap);
+}
+
+// —— 关前那一页：这关有什么新东西 ——
+function drawTeach() {
+  const ctx = P.ctx;
+  const lv = G.level;
+  ctx.fillStyle = 'rgba(10,6,18,0.86)';
+  ctx.fillRect(0, 0, L.W, L.H);
+  comicText(ctx, '第 ' + lv.no + ' 关 · ' + lv.name, L.W / 2, 70, 28);
+  const lines = [];
+  if (lv.index === 0) {
+    lines.push(['谁先暴露谁死', '你露着头才看得见，他也在找你']);
+    lines.push(['左下按住 = 缩头', '躲着最安全，但看不见、打不了']);
+    lines.push(['下面那栋楼是你，红圈是他的镜子', '红圈停在你窗口上会锁定你 → 快缩头']);
+    lines.push(['红圈在动 = 他探着头在找你', '这也是你唯一打得中他的时候']);
+  }
+  lv.teach.forEach((l) => l[0] && lines.push(l));
+  lines.forEach(([a, b], i) => {
+    const k = clamp((G.modeT - 0.2 - i * 0.25) / 0.3, 0, 1);
+    if (k <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = k;
+    text(a, L.W / 2, 128 + i * 52, 15, '#ffd23f', 'center', 900);
+    if (b) text(b, L.W / 2, 128 + i * 52 + 20, 12, '#f4f1de', 'center', 600);
+    ctx.restore();
+  });
+  const y0 = 128 + lines.length * 52 + 10;
+  text('子弹 ' + lv.rounds[0].bullets + ' 发 · 每回合 ' + lv.rounds[0].time + ' 秒' + (lv.rounds.length > 1 ? ' · ' + lv.rounds.length + ' 个回合' : ''), L.W / 2, y0, 13, '#c9c2e0', 'center', 700);
+  if (G.modeT > 0.8) text('点一下开始', L.W / 2, L.H - 60, 13, 'rgba(244,241,222,0.75)', 'center', 700);
+}
+
+function drawBossIntro() {
+  const ctx = P.ctx;
+  const lv = G.level;
+  const t = G.modeT;
+  ctx.fillStyle = '#1a0a14';
+  ctx.fillRect(0, 0, L.W, L.H);
+  // 他的剪影从暗里出来
+  const k = easeOut(clamp(t / 0.8, 0, 1));
+  ctx.save();
+  ctx.globalAlpha = k;
+  cut.person(ctx, L.W / 2, L.H * 0.62, 2.2, { hair: '#1b1530', jacket: '#2b2030', skin: '#3a2a3a', style: 'cap' }, { back: false, rifle: true });
+  ctx.restore();
+  if (t > 0.6) {
+    const kk = easeOut(clamp((t - 0.6) / 0.3, 0, 1));
+    ctx.save();
+    ctx.translate(L.W / 2, L.H * 0.16);
+    ctx.rotate(-0.05);
+    ctx.scale(kk, kk);
+    starburst(ctx, 0, 0, 120, 80, 16, '#e3263b');
+    comicText(ctx, 'BOSS', 0, -14, 22, '#f4f1de');
+    comicText(ctx, config.opponents.boss.name, 0, 16, 40);
+    ctx.restore();
+  }
+  (lv.bossIntro || []).forEach((l, i) => {
+    if (t > 1.2 + i * 0.4) text(l, L.W / 2, L.H * 0.74 + i * 26, 15, '#f4f1de', 'center', 800);
+  });
+}
+
+// —— 章节地图 ——
+function drawMap() {
+  const ctx = P.ctx;
+  const S = team.state();
+  ctx.fillStyle = '#1a1030';
+  ctx.fillRect(0, 0, L.W, L.H);
+  const ch = LV.CHAPTERS[0];
+  comicText(ctx, '第一章 · ' + ch.name, L.W / 2, 40, 26);
+  const rk = team.rank();
+  text('段位 ' + rk.name + ' · ★ ' + team.totalStars(), 16, 76, 13, '#ffd23f', 'left', 900);
+  text('奖金 ¥' + S.money, L.W - 16, 76, 13, '#ffd23f', 'right', 900);
+  const lvs = LV.LEVELS.filter((l) => l.chapter === ch.id);
+  const top = 120;
+  const gap = Math.min(66, (L.H - top - 110) / lvs.length);
+  const pts = lvs.map((lv, i) => ({ lv, x: L.W / 2 + (i % 2 ? 70 : -70) * (lv.boss ? 0 : 1), y: top + i * gap + 10 }));
+  ctx.strokeStyle = '#3a3150';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.stroke();
+  pts.forEach((p) => {
+    const lv = p.lv;
+    const open = levelUnlocked(lv);
+    const stars = S.stars[lv.id] || 0;
+    const r = lv.boss ? 30 : 22;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = !open ? '#2b2438' : stars ? '#ffd23f' : '#e3263b';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    if (open && !stars) {
+      const k = (G.t * 1.2) % 1;
+      ctx.strokeStyle = 'rgba(255,210,63,' + (1 - k).toFixed(2) + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 4 + k * 12, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    text(open ? (lv.boss ? '王' : String(lv.no)) : '🔒', p.x, p.y + 1, lv.boss ? 20 : 16, open && stars ? INK : '#f4f1de', 'center', 900);
+    const side = p.x < L.W / 2 ? 1 : -1;
+    const tx = lv.boss ? p.x : p.x + side * (r + 10);
+    const ty = lv.boss ? p.y + r + 14 : p.y - 6;
+    text(lv.name, tx, ty, 13, open ? '#f4f1de' : '#6d6380', lv.boss ? 'center' : side > 0 ? 'left' : 'right', 800);
+    const starStr = '★★★'.slice(0, stars) + '☆☆☆'.slice(0, 3 - stars);
+    text(lv.boss && !open ? '要 ' + lv.needStars + ' 颗星' : starStr, tx, ty + (lv.boss ? 16 : 17), 12, '#ffd23f', lv.boss ? 'center' : side > 0 ? 'left' : 'right', 800);
+    G.buttons.push({ id: 'lv_' + lv.id, x: p.x - r, y: p.y - r, w: r * 2, h: r * 2, fn: () => openLevel(lv) });
+  });
+  button('mapHome', '主页', 16, L.H - 62, 100, 42, goTitle);
+  if (S.revealed) button('mapTeam', '战队', L.W - 116, L.H - 62, 100, 42, () => setMode('team'));
+}
+
+// —— 关前：看目标、带一张卡 ——
+function drawLoadout() {
+  const ctx = P.ctx;
+  const lv = G.level;
+  const S = team.state();
+  ctx.fillStyle = '#1a1030';
+  ctx.fillRect(0, 0, L.W, L.H);
+  comicText(ctx, '第 ' + lv.no + ' 关 · ' + lv.name, L.W / 2, 44, 26);
+  let y = 86;
+  lv.rounds.forEach((R, i) => {
+    const o = config.opponents[R.opp];
+    const parts = [o.name, R.figures + ' 个人影', R.bullets + ' 发', R.time + ' 秒'];
+    if (R.cond) parts.push(config.conditions[R.cond].name);
+    if (R.goal === 'escort') parts.push('掩护小雨');
+    text((lv.rounds.length > 1 ? '回合 ' + (i + 1) + '：' : '') + parts.join(' · '), L.W / 2, y, 13, '#f4f1de', 'center', 700);
+    y += 22;
+  });
+  y += 8;
+  text('★ 过关', L.W / 2 - 120, y, 13, '#ffd23f', 'left', 800);
+  lv.stars.forEach((k, i) => text('★ ' + LV.starText(lv, k), L.W / 2 - 120, y + 22 * (i + 1), 13, '#ffd23f', 'left', 800));
+  const best = S.stars[lv.id] || 0;
+  if (best) text('最好成绩 ' + '★★★'.slice(0, best), L.W / 2 + 120, y, 12, '#c9c2e0', 'right', 700);
+  y += 22 * 3 + 16;
+  text('带一张卡进去', L.W / 2, y, 14, '#f4f1de', 'center', 900);
+  y += 16;
+  const cards = team.unlockedCards();
+  const cw = 104;
+  const chh = 96;
+  const gap = 10;
+  const cols = 3;
+  const x0 = (L.W - cw * cols - gap * (cols - 1)) / 2;
+  cards.forEach((c, i) => {
+    const cx = x0 + (i % cols) * (cw + gap);
+    const cy = y + Math.floor(i / cols) * (chh + gap);
+    const on = G.pickCard === c.id;
+    roundRect(ctx, cx, cy, cw, chh, 8);
+    ctx.fillStyle = on ? '#ffd23f' : '#f2d8a7';
+    ctx.fill();
+    ctx.lineWidth = on ? 4 : 2;
+    ctx.strokeStyle = on ? '#e3263b' : INK;
+    ctx.stroke();
+    cut.cardIcon(ctx, c.icon, cx + cw / 2, cy + 30, 0.8);
+    text(c.name, cx + cw / 2, cy + 62, 14, INK, 'center', 900);
+    text(c.desc, cx + cw / 2, cy + 80, 10, INK, 'center', 700);
+    G.buttons.push({ id: 'card_' + c.id, x: cx, y: cy, w: cw, h: chh, fn: () => (G.pickCard = on ? null : c.id) });
+  });
+  if (cards.length < team.CARDS.length) {
+    const rows = Math.ceil(cards.length / cols);
+    text('每第一次过一关，多解锁一张卡', L.W / 2, y + rows * (chh + gap) + 6, 11, '#9a90b0');
+  }
+  button('go', '开打', L.W / 2 + 10, L.H - 76, 150, 54, startLevel, true);
+  button('back', '回地图', L.W / 2 - 160, L.H - 76, 150, 54, goMap);
+}
+
+// —— 过关结算：星星砸下来，金币飞进奖金栏 ——
+function drawResult() {
+  const ctx = P.ctx;
+  const R = G.resultInfo;
+  const lv = G.level;
+  const S = team.state();
+  const t = G.modeT;
+  ctx.fillStyle = '#1a1030';
+  ctx.fillRect(0, 0, L.W, L.H);
+  comicText(ctx, lv.boss ? '打败了' + config.opponents.boss.name + '！' : '过关！', L.W / 2, 70, 38);
+  text('第 ' + lv.no + ' 关 · ' + lv.name + ' · 用时 ' + Math.round(R.sec) + ' 秒', L.W / 2, 112, 13, '#c9c2e0', 'center', 700);
+  // 三颗星
+  for (let i = 0; i < 3; i++) {
+    const at = 0.6 + i * 0.4;
+    const got = i < R.stars;
+    const x = L.W / 2 + (i - 1) * 84;
+    const yBase = 190 - (i === 1 ? 14 : 0);
+    let k = got ? clamp((t - at) / 0.25, 0, 1) : 1;
+    const y = got ? yBase - (1 - easeOut(k)) * 160 : yBase;
+    const sz = got ? 34 * (k < 1 ? 1.3 - 0.3 * k : 1) : 30;
+    starburst(ctx, x, y, sz, sz * 0.45, 5, got && k > 0 ? '#ffd23f' : '#3a3150');
+  }
+  // 三条星星条件
+  const rows = [['过关', true]].concat(lv.stars.map((k, i) => [LV.starText(lv, k), R.conds[i]]));
+  rows.forEach(([str, ok], i) => text((ok ? '✓ ' : '✗ ') + str, L.W / 2 - 110, 262 + i * 26, 14, ok ? '#90ee90' : '#9a90b0', 'left', 800));
+  // 金币飞进奖金栏
+  const coinT = clamp((t - 1.9) / 0.7, 0, 1);
+  if (t > 1.9) {
+    for (let i = 0; i < 8; i++) {
+      const k = clamp(coinT * 1.4 - i * 0.06, 0, 1);
+      if (k <= 0 || k >= 1) continue;
+      const x = lerp(L.W / 2, L.W - 40, easeOut(k)) + Math.sin(i * 2) * 20 * (1 - k);
+      const y = lerp(370, 40, easeOut(k)) - Math.sin(k * Math.PI) * 30;
+      ctx.fillStyle = '#ffd23f';
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = INK;
+      ctx.stroke();
+    }
+  }
+  comicText(ctx, '+¥' + R.money, L.W / 2, 370, 26, '#90ee90');
+  text('奖金 ¥' + (t < 2.4 ? S.money - R.money : S.money), L.W - 16, 40, 14, '#ffd23f', 'right', 900);
+  text('段位 ' + team.rank().name, 16, 40, 14, '#ffd23f', 'left', 900);
+  if (R.cardUnlocked && t > 2.2) text('解锁新卡：' + R.cardUnlocked.name + '（' + R.cardUnlocked.desc + '）', L.W / 2, 410, 13, '#3ef0ff', 'center', 800);
+  if (t < 2.2) return;
+  if (R.reveal) {
+    button('continue', '继续', L.W / 2 - 100, L.H - 90, 200, 56, () => setMode('reveal'), true);
+    return;
+  }
+  const next = LV.LEVELS[lv.index + 1];
+  if (next && levelUnlocked(next)) button('next', '下一关', L.W / 2 + 10, L.H - 140, 150, 54, () => openLevel(next), true);
+  button('again', '再打一次', next && levelUnlocked(next) ? L.W / 2 - 160 : L.W / 2 - 75, L.H - 140, 150, 54, () => openLevel(lv), !(next && levelUnlocked(next)));
+  button('resMap', '回地图', L.W / 2 - 60, L.H - 72, 120, 44, goMap);
 }
 
 // —— 开场 ——
@@ -2267,7 +3139,7 @@ function drawTitle() {
 
   const S = team.state();
   const by = Math.min(L.H - 150, tc.y + d / 2 + 30);
-  button('start', S.cups ? '再打一次网吧赛' : '开始比赛', L.W / 2 - 110, by, 220, 58, startRun, true);
+  button('start', S.cleared.length ? '继续比赛' : '开始比赛', L.W / 2 - 110, by, 220, 58, goMap, true);
   button('team', S.revealed ? '战队' : '🔒 战队', L.W / 2 - 160, by + 74, 150, 44, () => {
     if (S.revealed) setMode('team');
     else toast('赢下第一次网吧赛就知道了');
@@ -2322,42 +3194,6 @@ function drawClassic() {
     lines.forEach(([str, col, w], i) => text(str, L.W / 2, 150 + i * 28, 13, col, 'center', w));
     button('classicAgain', '再来一局', L.W / 2 - 160, L.H - 110, 150, 50, startClassic, true);
     button('classicHome', '回主页', L.W / 2 + 10, L.H - 110, 150, 50, goTitle);
-  }
-}
-
-// —— 选卡：三选一 ——
-function drawPick() {
-  const ctx = P.ctx;
-  ctx.fillStyle = '#1a1030';
-  ctx.fillRect(0, 0, L.W, L.H);
-  comicText(ctx, '选一张', L.W / 2, L.H * 0.16, 38);
-  text('带进下一场（这次网吧赛一直有效）', L.W / 2, L.H * 0.16 + 38, 13);
-  const cw = 108;
-  const ch = 170;
-  const gap = 10;
-  const x0 = (L.W - cw * 3 - gap * 2) / 2;
-  const y0 = L.H * 0.32;
-  G.offer.forEach((c, i) => {
-    const k = easeOut(clamp((G.modeT - i * 0.12) / 0.3, 0, 1));
-    if (k <= 0) return;
-    const x = x0 + i * (cw + gap);
-    const y = y0 + (1 - k) * 60;
-    ctx.save();
-    ctx.globalAlpha = k;
-    roundRect(ctx, x, y, cw, ch, 10);
-    ctx.fillStyle = '#f2d8a7';
-    ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = INK;
-    ctx.stroke();
-    cut.cardIcon(ctx, c.icon, x + cw / 2, y + 52, 1.1);
-    text(c.name, x + cw / 2, y + 108, 17, INK, 'center', 900);
-    text(c.desc, x + cw / 2, y + 136, 12, INK, 'center', 700);
-    ctx.restore();
-    if (k >= 1) G.buttons.push({ id: 'card' + i, x, y, w: cw, h: ch, fn: () => pickCard(c.id) });
-  });
-  if (G.cards.length) {
-    text('已经有：' + G.cards.map((id) => team.CARDS.find((x) => x.id === id).name).join('、'), L.W / 2, y0 + ch + 40, 13, '#c9c2e0');
   }
 }
 
@@ -2423,16 +3259,15 @@ function drawTeam() {
 }
 
 // —— 网吧赛赢了 ——
-function drawReveal(champ) {
+function drawReveal() {
   const ctx = P.ctx;
-  const t = champ ? 3.4 + Math.min(G.modeT, 4) + 0.6 : G.modeT;
-  cut.revealScene(ctx, L, t, team.TEAMMATES, { title: champ ? '冠军！' : '职业战队！' });
-  const done = champ ? G.modeT > 1.2 : G.modeT > cut.REVEAL_SEC - 0.6;
-  if (!champ && !done && G.modeT > 1) text('点一下跳过', L.W - 16, L.H - 20, 11, 'rgba(244,241,222,0.5)', 'right');
+  const t = G.modeT;
+  cut.revealScene(ctx, L, t, team.TEAMMATES, { title: '职业战队！' });
+  const done = G.modeT > cut.REVEAL_SEC - 0.6;
+  if (!done && G.modeT > 1) text('点一下跳过', L.W - 16, L.H - 20, 11, 'rgba(244,241,222,0.5)', 'right');
   if (done) {
-    text('这次网吧赛奖金 ¥' + G.earned, L.W / 2, L.H - 150, 15, '#ffd23f', 'center', 900);
     button('toTeam', '进入战队', L.W / 2 - 110, L.H - 126, 220, 54, () => setMode('team'), true);
-    button('home2', '回主页', L.W / 2 - 60, L.H - 62, 120, 40, goTitle);
+    button('home2', '回地图', L.W / 2 - 60, L.H - 62, 120, 40, goMap);
   }
 }
 
@@ -2443,14 +3278,17 @@ function render() {
   ctx.fillStyle = '#120c1c';
   ctx.fillRect(0, 0, L.W, L.H);
   const m = G.mode;
+  // 震屏
+  if (G.shake > 0) ctx.translate((Math.random() - 0.5) * 12 * G.shake, (Math.random() - 0.5) * 12 * G.shake);
 
   if (m === 'title') drawTitle();
   else if (m === 'classic') drawClassic();
   else if (m === 'team') drawTeam();
-  else if (m === 'pick') drawPick();
-  else if (m === 'reveal') drawReveal(false);
-  else if (m === 'champ') drawReveal(true);
-  else if (m === 'clear') cut.matchClear(ctx, L, G.modeT, G.matchNo, MATCHES, team.state().fans);
+  else if (m === 'map') drawMap();
+  else if (m === 'loadout') drawLoadout();
+  else if (m === 'result') drawResult();
+  else if (m === 'bossIntro') drawBossIntro();
+  else if (m === 'reveal') drawReveal();
   else if (m === 'move') cut.relocate(ctx, L, G.modeT, G.duel.sc.theme, scopeC, D);
   else if (m === 'rescue') {
     cut.rescue(ctx, L, G.modeT, G.duel.sc.theme);
@@ -2460,19 +3298,33 @@ function render() {
   else if (m === 'fail') drawFail();
   else drawScope({ tint: m === 'dead' ? 'rgba(120,20,30,0.45)' : null });
 
-  if (m === 'play' || m === 'hit' || m === 'intro' || m === 'story' || m === 'howto') drawHud();
-  if (m === 'howto') drawHowto();
+  if (m === 'play' || m === 'hit' || m === 'intro' || m === 'teach' || m === 'dry' || m === 'ammoGift') drawHud();
+  if (m === 'teach') drawTeach();
 
-  if (m === 'story') {
-    const mt = match();
-    comicPanel(mt.name, mt.place + ' · 三个狙击手', G.cards.length ? '带着 ' + G.cards.length + ' 张卡' : '');
-  } else if (m === 'intro') {
-    const dc = G.duel.dcfg;
-    comicPanel('对手 ' + (G.duelIndex + 1) + ' / ' + config.duelsPerLevel, G.duel.sc.theme.name + ' · ' + dc.name, dc.sub);
+  if (m === 'intro') {
+    const R = G.duel.round;
+    const o = G.duel.opp;
+    const sub = G.duel.sc.theme.name + ' · ' + o.name + (R.cond ? ' · ' + config.conditions[R.cond].name : '');
+    comicPanel(G.level.rounds.length > 1 ? '回合 ' + (G.roundIdx + 1) + ' / ' + G.level.rounds.length : '第 ' + G.level.no + ' 关', sub, '破绽：' + o.tell);
   } else if (m === 'dead') {
     panel('你出局了');
-    button('rescue', '▶ 叫队友拉你', L.W / 2 - 110, L.H * 0.52, 220, 58, callTeammate, true);
-    button('giveup', '不了', L.W / 2 - 60, L.H * 0.52 + 76, 120, 44, () => setMode('fail'));
+    button('rescue', '▶ 叫小雨拉你起来', L.W / 2 - 120, L.H * 0.52, 240, 58, () => callTeammate('rescue'), true);
+    button('giveup', '不了', L.W / 2 - 60, L.H * 0.52 + 76, 120, 44, () => fail('dead'));
+  } else if (m === 'dry') {
+    panel('子弹打光了');
+    button('ammo', '▶ 让小雨扔一发过来', L.W / 2 - 120, L.H * 0.52, 240, 58, () => callTeammate('ammo'), true);
+    button('giveup2', '不了', L.W / 2 - 60, L.H * 0.52 + 76, 120, 44, () => fail('dry'));
+  } else if (m === 'ammoGift') {
+    // 小雨从旁边扔来一发子弹
+    const k = clamp(G.modeT / 0.8, 0, 1);
+    const x = lerp(-20, L.W / 2, k);
+    const y = lerp(L.H * 0.3, L.H * 0.5, k) - Math.sin(k * Math.PI) * 120;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(G.modeT * 12);
+    drawBullet(ctx, 0, 0, true);
+    ctx.restore();
+    comicText(ctx, '接着！', L.W / 2, L.H * 0.36, 30);
   } else if (m === 'ad') {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, L.W, L.H);
@@ -2508,9 +3360,7 @@ function frame() {
 }
 
 goTitle();
-startMatch(); // 先把第一场备好（开场背后不画它），点「开始比赛」再从头开
-setMode('title');
-platform.exposeForTest('__vasily', { _sd: startDuel, startClassic, G, config, scene, team, cut, scopeC, D, eyeBtn, trigBtn, scale, setMode, startRun, startMatch, afterClear });
+platform.exposeForTest('__vasily', { G, config, scene, team, cut, LV, scopeC, D, eyeBtn, trigBtn, panelR, scale, setMode, openLevel, startLevel, startRound, afterHit, finishLevel, goMap, startClassic, levelUnlocked });
 platform.nextFrame(frame);
 
 });
@@ -2536,7 +3386,10 @@ function setup(onTouch) {
         onTouch(type, list[i].identifier, list[i].clientX, list[i].clientY);
       }
     };
-    wx.onTouchStart(send('down'));
+    wx.onTouchStart((e) => {
+      unlockAudio();
+      send('down')(e);
+    });
     wx.onTouchMove(send('move'));
     wx.onTouchEnd(send('up'));
     wx.onTouchCancel(send('up'));
@@ -2557,6 +3410,7 @@ function setup(onTouch) {
     };
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      unlockAudio();
       canvas.setPointerCapture(e.pointerId);
       const p = pos(e);
       onTouch('down', e.pointerId, p[0], p[1]);
@@ -2609,6 +3463,55 @@ function showRewardedAd(adUnitId, onReward, onSkip) {
   return true;
 }
 
+// 音效：WebAudio（微信 wx.createWebAudioContext，浏览器 AudioContext）。放不出来就安静，不报错
+const sfx = require('./sfx.js');
+let audio = null;
+const buffers = {};
+let muted = false;
+function audioCtx() {
+  if (audio !== null) return audio;
+  try {
+    if (isWx && wx.createWebAudioContext) audio = wx.createWebAudioContext();
+    else if (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)) audio = new (window.AudioContext || window.webkitAudioContext)();
+    else audio = false;
+  } catch (e) {
+    audio = false;
+  }
+  return audio;
+}
+// 浏览器要在手指点下去的那一刻打开声音
+function unlockAudio() {
+  const a = audioCtx();
+  if (a && a.state === 'suspended' && a.resume) a.resume();
+}
+function sound(name, volume) {
+  if (muted) return;
+  const a = audioCtx();
+  if (!a) return;
+  try {
+    if (!buffers[name]) {
+      const sr = 22050;
+      const data = sfx.make(name, sr);
+      if (!data) return;
+      const buf = a.createBuffer(1, data.length, sr);
+      buf.getChannelData(0).set(data);
+      buffers[name] = buf;
+    }
+    const src = a.createBufferSource();
+    src.buffer = buffers[name];
+    const g = a.createGain();
+    g.gain.value = volume === undefined ? 0.6 : volume;
+    src.connect(g);
+    g.connect(a.destination);
+    src.start(0);
+  } catch (e) {
+    // 放不出声音就算了
+  }
+}
+function setMuted(v) {
+  muted = !!v;
+}
+
 // 存档：微信用 wx.setStorageSync，浏览器用 localStorage
 function load(key) {
   try {
@@ -2633,7 +3536,7 @@ function exposeForTest(name, value) {
   if (!isWx && typeof window !== 'undefined') window[name] = value;
 }
 
-module.exports = { isWx, setup, now, nextFrame, vibrate, showRewardedAd, load, save, exposeForTest };
+module.exports = { isWx, setup, now, nextFrame, vibrate, showRewardedAd, load, save, exposeForTest, sound, unlockAudio, setMuted };
 
 });
 __def("js/scene.js", function (module, exports, require) {
@@ -2652,7 +3555,9 @@ const NEAR_PARALLAX = 1.25;
 const CLOTH = ['#e84855', '#2e86ab', '#f4f1de', '#f9c74f', '#90be6d'];
 
 // D：狙击镜直径。藏身点必须能被挪到镜子正中，所以离边太近的窗户不算。
-function build(seed, duelCfg, D, themeId) {
+// extra：{ figures 一共几个人影（含狙击手）, decoys 头盔假人几个, night, pigeons, escort }
+function build(seed, duelCfg, D, themeId, extra) {
+  extra = extra || {};
   const th = themes.get(themeId);
   const r = rng(seed);
   const buildings = [];
@@ -2688,17 +3593,33 @@ function build(seed, duelCfg, D, themeId) {
       w.y + w.h / 2 < WORLD_H - half
   );
   const spot = spots[Math.floor(r() * spots.length)];
-  // 狡猾型的假人（头盔挑在杆子上）：离真人远一点的另一扇窗
-  let decoy = null;
-  if (duelCfg.decoy) {
-    const far = spots.filter((w) => Math.abs(w.x - spot.x) + Math.abs(w.y - spot.y) > 140);
-    const dw = far.length ? far[Math.floor(r() * far.length)] : null;
-    if (dw) decoy = { win: dw, lift: 0 };
+  const color = mix(th.winDark, '#8a7a98', (duelCfg.contrast || 0.2) * 3);
+  // 人影：第一个是狙击手，后面是路人和头盔假人。互相隔开一点
+  const figures = [{ kind: 'sniper', win: spot, lift: 0, pose: r() < 0.5 ? 0 : 1, shift: duelCfg.poseShift || 3, color, sway: 0, swayOn: true, phase: r() * 6 }];
+  const nFig = Math.max(1, extra.figures || 1);
+  const nDecoy = extra.decoys || 0;
+  const taken = (w) => figures.some((f) => Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 70);
+  const pool = spots.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    const t = pool[i];
+    pool[i] = pool[j];
+    pool[j] = t;
   }
+  for (const w of pool) {
+    if (figures.length >= nFig + nDecoy) break;
+    if (taken(w)) continue;
+    const isDecoy = figures.length >= nFig;
+    figures.push({
+      kind: isDecoy ? 'decoy' : 'civ', win: w, lift: isDecoy ? 0 : 1, pose: r() < 0.5 ? 0 : 1, shift: 3, color,
+      sway: 0, swayOn: !isDecoy, phase: r() * 6, stick: !isDecoy && r() < 0.35, timer: 1 + r() * 3, lit: false,
+    });
+  }
+  const decoy = figures.find((f) => f.kind === 'decoy') || null;
 
   // 干扰：会在你眨眼时变的东西
   const distractors = [];
-  const free = allWindows.filter((w) => !w.bricked && w !== spot && (!decoy || w !== decoy.win));
+  const free = allWindows.filter((w) => !w.bricked && !figures.some((f) => f.win === w));
   for (let i = free.length - 1; i > 0; i--) {
     const j = Math.floor(r() * (i + 1));
     const tmp = free[i];
@@ -2744,6 +3665,13 @@ function build(seed, duelCfg, D, themeId) {
   const bags = [];
   for (let bx = -60; bx < WORLD_W * NEAR_PARALLAX + 200; bx += 46 + r() * 30) bags.push({ x: bx, h: 18 + r() * 22, v: r() });
 
+  // 鸽群：每栋楼顶一群。楼里有人探头、或者子弹打在这栋楼上，它们就飞
+  const flocks = extra.pigeons
+    ? buildings.map((b, i) => ({ b: i, x: b.x + b.w * (0.3 + r() * 0.4), y: b.y - 2, n: 4 + Math.floor(r() * 3), state: 'sit', t: 0 }))
+    : [];
+  // 掩护队友过街：街上的掩体
+  const mate = extra.escort ? { x: 40, y: GROUND - 2, state: 'hide', timer: 1.5, lock: 0, covers: [40, 200, 360, 520, 680, 820], next: 1, done: false, down: false } : null;
+
   const flakes = [];
   for (let i = 0; i < 60; i++) flakes.push({ x: r(), y: r(), s: 0.5 + r() });
 
@@ -2758,30 +3686,57 @@ function build(seed, duelCfg, D, themeId) {
     far,
     bags,
     flakes,
+    allWindows,
+    figures,
     decoy,
-    enemy: {
-      win: spot,
-      pose: r() < 0.5 ? 0 : 1,
-      shift: duelCfg.poseShift,
-      lift: 0, // 0 = 缩在窗台下，1 = 探出头
-      color: mix(th.winDark, '#8a7a98', duelCfg.contrast * 3),
-    },
+    enemy: figures[0], // 狙击手（lift：0 = 缩在窗台下，1 = 探出头）
+    night: !!extra.night,
+    flocks,
+    mate,
+    trail: [], // 换位型路过的窗帘
   };
 }
 
 // 头的位置：探头时在窗口上部，缩着时降到窗台下（被窗框挡住）
 // lift 不传就用他现在的高度；传 1 = 「探出头时会在哪」（瞄准、判定都用这个）
 const DUCK = 15;
+function figureHead(f, lift) {
+  const l = lift === undefined ? f.lift : lift;
+  const dx = f.kind === 'decoy' ? 0 : f.pose ? f.shift : -f.shift;
+  return { x: f.win.x + f.win.w / 2 + dx + (f.sway || 0), y: f.win.y + 8 + (1 - l) * DUCK };
+}
+
 function enemyHead(sc, lift) {
-  const e = sc.enemy;
-  const l = lift === undefined ? e.lift : lift;
-  const dx = e.pose ? e.shift : -e.shift;
-  return { x: e.win.x + e.win.w / 2 + dx, y: e.win.y + 8 + (1 - l) * DUCK };
+  return figureHead(sc.enemy, lift);
 }
 
 function decoyHead(sc) {
-  const q = sc.decoy;
-  return { x: q.win.x + q.win.w / 2, y: q.win.y + 8 + (1 - q.lift) * DUCK };
+  return figureHead(sc.decoy);
+}
+
+// 换位型 / Boss 换窗：挑一扇离得够远、没人的窗；返回路过的几扇窗（窗帘会一扇扇动）
+function relocateSniper(sc, rand, D, now) {
+  const e = sc.enemy;
+  const half = D / 2 + 4;
+  const free = sc.spots.filter((w) => w !== e.win && !sc.figures.some((f) => f !== e && Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 60) && Math.abs(w.x - e.win.x) + Math.abs(w.y - e.win.y) > 90);
+  if (!free.length) return;
+  const to = free[Math.floor(rand() * free.length)];
+  const from = e.win;
+  sc.trail = [];
+  for (let k = 1; k <= 4; k++) {
+    const px = from.x + ((to.x - from.x) * k) / 5;
+    const py = from.y + ((to.y - from.y) * k) / 5;
+    let best = null;
+    let bd = 1e9;
+    sc.allWindows.forEach((w) => {
+      const dd = Math.abs(w.x - px) + Math.abs(w.y - py);
+      if (!w.bricked && dd < bd) { bd = dd; best = w; }
+    });
+    if (best && bd < 50) sc.trail.push({ win: best, t0: now + k * 0.25 });
+  }
+  e.win = to;
+  e.pose = rand() < 0.5 ? 0 : 1;
+  void half;
 }
 
 function toggle(d) {
@@ -3174,78 +4129,269 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
   // 干扰物
   sc.distractors.forEach((d) => drawDistractor(ctx, d, th, ox, oy, t));
 
-  // 对面的狙击手：一个比窗里黑暗稍亮一点的剪影
-  const e = sc.enemy;
-  const head = enemyHead(sc);
+  // 夜里：整片压暗，只留亮灯的窗
+  if (sc.night) {
+    ctx.fillStyle = 'rgba(4,4,18,0.8)';
+    ctx.fillRect(cx - D / 2, cy - D / 2, D, D);
+    const glow = (w) => {
+      ctx.fillStyle = 'rgba(255,214,120,0.22)';
+      ctx.fillRect(ox + w.x - 5, oy + w.y - 5, w.w + 10, w.h + 10);
+      ctx.fillStyle = '#ffd97a';
+      ctx.fillRect(ox + w.x, oy + w.y, w.w, w.h);
+    };
+    sc.distractors.forEach((d) => d.kind === 'lit' && d.state && glow(d.win));
+    sc.figures.forEach((f) => f.lit && glow(f.win));
+  }
+
+  // 人影：狙击手、路人、头盔假人，都是一样颜色的剪影
   const drop = opt.enemyDrop || 0;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(ox + e.win.x, oy + e.win.y, e.win.w, e.win.h);
-  ctx.clip();
-  ctx.fillStyle = e.color;
-  ctx.beginPath();
-  ctx.arc(ox + head.x, oy + head.y + drop, 4.5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillRect(ox + head.x - 7, oy + head.y + 5 + drop, 14, 12);
-  ctx.restore();
-  if (!drop) {
-    ctx.strokeStyle = e.color;
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    const sy = e.win.y + 8 + DUCK * 0.6;
-    ctx.moveTo(ox + head.x + 2, oy + sy + 7);
-    ctx.lineTo(ox + head.x - 4 - (e.pose ? 7 : 4), oy + e.win.y + e.win.h + 2);
-    ctx.stroke();
-  }
-  if (sc.decoy) {
-    // 假人：头盔挑在杆子上。跟真人比，头顶是平弧、没有肩膀、没有枪管
-    const q = sc.decoy;
-    const dh = decoyHead(sc);
+  sc.figures.forEach((f) => {
+    const h = figureHead(f);
+    const dy = f === sc.enemy ? drop : 0;
+    const dim = sc.night && !f.lit ? 0.32 : 1;
     ctx.save();
+    ctx.globalAlpha = dim;
     ctx.beginPath();
-    ctx.rect(ox + q.win.x, oy + q.win.y, q.win.w, q.win.h);
+    ctx.rect(ox + f.win.x, oy + f.win.y, f.win.w, f.win.h);
     ctx.clip();
-    ctx.fillStyle = e.color;
-    ctx.beginPath();
-    ctx.arc(ox + dh.x, oy + dh.y + 1, 5.5, Math.PI, 0);
-    ctx.fill();
-    ctx.fillRect(ox + dh.x - 6.5, oy + dh.y, 13, 2);
-    ctx.fillRect(ox + dh.x - 1, oy + dh.y + 2, 2, 20);
+    ctx.fillStyle = sc.night && f.lit ? '#1b1530' : f.color;
+    if (f.kind === 'decoy') {
+      // 假人：头盔挑在杆子上。头顶是平弧、没有肩膀、没有枪管
+      ctx.beginPath();
+      ctx.arc(ox + h.x, oy + h.y + 1, 5.5, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(ox + h.x - 6.5, oy + h.y, 13, 2);
+      ctx.fillRect(ox + h.x - 1, oy + h.y + 2, 2, 20);
+    } else {
+      ctx.beginPath();
+      ctx.arc(ox + h.x, oy + h.y + dy, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(ox + h.x - 7, oy + h.y + 5 + dy, 14, 12);
+    }
     ctx.restore();
+    // 长条：狙击手探头找你时露出枪管；有的路人拿着拖把
+    const showBarrel = f === sc.enemy ? opt.barrel && !drop : f.stick && f.lift > 0.5;
+    if (showBarrel) {
+      ctx.save();
+      ctx.globalAlpha = dim;
+      ctx.strokeStyle = sc.night && f.lit ? '#1b1530' : f.color;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(ox + h.x + 2, oy + h.y + 7);
+      ctx.lineTo(ox + h.x - 4 - (f.pose ? 7 : 4), oy + f.win.y + f.win.h + 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  });
+
+  // 焦躁型缩着时敲窗台：窗台上两个小指节一上一下
+  if (opt.tap) {
+    const w = sc.enemy.win;
+    const k = Math.sin(t * 14) > 0 ? 1.5 : 0;
+    ctx.fillStyle = sc.enemy.color;
+    ctx.fillRect(ox + w.x + 4, oy + w.y + w.h - 4 - k, 3, 4 + k);
+    ctx.fillRect(ox + w.x + 9, oy + w.y + w.h - 4 - (1.5 - k), 3, 4 + (1.5 - k));
   }
+
+  // 换位型路过的窗帘：一扇扇晃一下
+  sc.trail.forEach((tr) => {
+    const age = t - tr.t0;
+    if (age < 0 || age > 0.9) return;
+    const w = tr.win;
+    ctx.fillStyle = '#f4ead0';
+    ctx.beginPath();
+    ctx.moveTo(ox + w.x, oy + w.y);
+    for (let i = 0; i <= 6; i++) ctx.lineTo(ox + w.x + w.w * 0.5 + Math.sin(age * 20 + i) * 3, oy + w.y + (w.h * i) / 6);
+    ctx.lineTo(ox + w.x, oy + w.y + w.h);
+    ctx.closePath();
+    ctx.fill();
+  });
+
   if (th.win === 'lattice') {
     sc.buildings.forEach((b) => b.windows.forEach((w) => !w.bricked && drawLattice(ctx, w, ox, oy)));
   }
   if (opt.glint) {
+    const head = enemyHead(sc);
     const gx = ox + head.x - 2;
     const gy = oy + head.y + 1;
+    const r = sc.night ? 10 : 7;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.moveTo(gx, gy - 7);
+    ctx.moveTo(gx, gy - r);
     ctx.lineTo(gx + 1.5, gy - 1.5);
-    ctx.lineTo(gx + 7, gy);
+    ctx.lineTo(gx + r, gy);
     ctx.lineTo(gx + 1.5, gy + 1.5);
-    ctx.lineTo(gx, gy + 7);
+    ctx.lineTo(gx, gy + r);
     ctx.lineTo(gx - 1.5, gy + 1.5);
-    ctx.lineTo(gx - 7, gy);
+    ctx.lineTo(gx - r, gy);
     ctx.lineTo(gx - 1.5, gy - 1.5);
     ctx.closePath();
     ctx.fill();
   }
 
+  // 鸽群：坐着 / 飞走
+  sc.flocks.forEach((fl) => {
+    if (fl.state === 'gone') return;
+    for (let i = 0; i < fl.n; i++) {
+      let bx = ox + fl.x + i * 7 - fl.n * 3.5;
+      let by = oy + fl.y;
+      if (fl.state === 'fly') {
+        const a = t - fl.t;
+        bx += (i - fl.n / 2) * a * 30 + Math.sin(a * 9 + i) * 3;
+        by -= a * (60 + i * 12);
+      }
+      ctx.fillStyle = sc.night ? '#8a8aa0' : '#e8e6f0';
+      ctx.beginPath();
+      if (fl.state === 'fly') {
+        const wing = Math.sin((t - fl.t) * 30 + i) * 3;
+        ctx.moveTo(bx - 5, by - wing);
+        ctx.lineTo(bx, by);
+        ctx.lineTo(bx + 5, by - wing);
+        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = ctx.fillStyle;
+        ctx.stroke();
+      } else {
+        ctx.arc(bx, by - 3, 3, 0, Math.PI * 2);
+        ctx.arc(bx + 3, by - 6, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  });
+
   // 地面
   ctx.fillStyle = th.ground;
   ctx.fillRect(cx - D / 2, oy + GROUND, D, D);
+
+  // 掩护队友：街上的箱子掩体和跑过去的队友
+  if (sc.mate) {
+    const m = sc.mate;
+    m.covers.forEach((x) => {
+      ctx.fillStyle = '#8a5a2c';
+      ctx.fillRect(ox + x - 14, oy + GROUND - 22, 28, 22);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(ox + x - 14, oy + GROUND - 22, 28, 22);
+    });
+    if (!m.down) {
+      const mx = ox + m.x + (m.state === 'hide' ? 16 : 0);
+      const my = oy + GROUND;
+      const run = m.state === 'run' ? Math.sin(t * 18) * 4 : 0;
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(mx, my - 12);
+      ctx.lineTo(mx - 3 + run, my);
+      ctx.moveTo(mx, my - 12);
+      ctx.lineTo(mx + 3 - run, my);
+      ctx.stroke();
+      ctx.fillStyle = '#2e86ab';
+      ctx.fillRect(mx - 5, my - 24, 10, 13);
+      ctx.fillStyle = '#f1c6a8';
+      ctx.beginPath();
+      ctx.arc(mx, my - 28, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1f6f78';
+      ctx.fillRect(mx - 5, my - 33, 10, 4);
+      if (m.lock > 0) {
+        ctx.strokeStyle = '#ff4d5e';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(mx, my - 18, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * m.lock);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // 大雾：一层灰白，浓淡一阵一阵
+  if (opt.fog > 0) {
+    ctx.fillStyle = 'rgba(222,226,232,' + (opt.fog * 0.88).toFixed(2) + ')';
+    ctx.fillRect(cx - D / 2, cy - D / 2, D, D);
+    ctx.fillStyle = 'rgba(240,242,246,' + (opt.fog * 0.5).toFixed(2) + ')';
+    for (let i = 0; i < 6; i++) {
+      const fx = cx - D / 2 + (((i * 97 + t * 14 - cam.x * 0.4) % (D + 120)) + D + 120) % (D + 120) - 60;
+      const fy = cy - D / 2 + ((i * 61) % D);
+      ctx.beginPath();
+      ctx.arc(fx, fy, 50, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 
   // 近景掩体：移得快
   const nox = cx - cam.x * NEAR_PARALLAX;
   const noy = cy - cam.y * NEAR_PARALLAX + WORLD_H * (NEAR_PARALLAX - 1) * 0.5;
   drawFront(ctx, sc, nox, noy);
 
+  if (sc.night) {
+    ctx.fillStyle = 'rgba(4,4,18,0.45)';
+    ctx.fillRect(cx - D / 2, oy + GROUND - 40, D, D);
+  }
   drawWeather(ctx, sc, cam, cx, cy, D, t);
 }
 
-module.exports = { build, draw, enemyHead, decoyHead, toggle, WORLD_W, WORLD_H, GROUND };
+module.exports = { build, draw, enemyHead, decoyHead, figureHead, relocateSniper, toggle, WORLD_W, WORLD_H, GROUND };
+
+});
+__def("js/sfx.js", function (module, exports, require) {
+// 音效：全部用代码合成（不用音频文件），微信和浏览器都用 WebAudio 播放。
+// 以后换成正式音效，只要换这里。make(name, sr) 返回一串 -1..1 的采样。
+
+function env(t, a, d) {
+  // a 秒起音，d 秒衰减
+  return t < a ? t / a : Math.exp(-(t - a) / d);
+}
+
+function noise(seed) {
+  let s = seed || 1;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s / 2147483647) * 2 - 1;
+  };
+}
+
+const RECIPES = {
+  // 你开枪：一声闷响 + 沙沙的尾巴
+  shot: { len: 0.4, f: (t, n) => n() * env(t, 0.002, 0.07) * 0.9 + Math.sin(2 * Math.PI * 70 * t) * env(t, 0.002, 0.12) * 0.8 },
+  // 爆头：更重、更长
+  boom: { len: 0.6, f: (t, n) => n() * env(t, 0.002, 0.12) * 0.8 + Math.sin(2 * Math.PI * (120 - 80 * t) * t) * env(t, 0.003, 0.2) },
+  // 红圈靠近你：滴
+  beep: { len: 0.07, f: (t) => Math.sin(2 * Math.PI * 1400 * t) * env(t, 0.003, 0.03) * 0.5 },
+  // 锁定圈在转：低一点的滴
+  tick: { len: 0.06, f: (t) => Math.sin(2 * Math.PI * 900 * t) * env(t, 0.002, 0.025) * 0.5 },
+  // 心跳：咚咚
+  heart: { len: 0.4, f: (t) => { const k = t < 0.18 ? t : t - 0.18; const a = t < 0.18 ? 1 : 0.7; return Math.sin(2 * Math.PI * 55 * k) * env(k, 0.01, 0.05) * a; } },
+  // 金币
+  coin: { len: 0.22, f: (t) => Math.sign(Math.sin(2 * Math.PI * (t < 0.07 ? 1320 : 1760) * t)) * env(t < 0.07 ? t : t - 0.07, 0.002, 0.06) * 0.25 },
+  // 星星：一串往上的音
+  star: { len: 0.3, f: (t) => { const i = Math.min(2, Math.floor(t / 0.08)); const k = t - i * 0.08; return Math.sin(2 * Math.PI * [880, 1175, 1568][i] * t) * env(k, 0.003, 0.08) * 0.45; } },
+  // 打错 / 打空：嗡
+  wrong: { len: 0.3, f: (t) => Math.sign(Math.sin(2 * Math.PI * (140 + Math.sin(t * 60) * 10) * t)) * env(t, 0.005, 0.12) * 0.22 },
+  // 缩头：衣服蹭墙
+  duck: { len: 0.1, f: (t, n) => n() * env(t, 0.01, 0.03) * 0.25 },
+  // 爬过去
+  crawl: { len: 0.5, f: (t, n) => n() * (0.5 + 0.5 * Math.sin(t * 40)) * env(t, 0.05, 0.25) * 0.2 },
+  // 镜片反光：叮
+  glint: { len: 0.12, f: (t) => Math.sin(2 * Math.PI * 3200 * t) * env(t, 0.001, 0.03) * 0.3 },
+  // 鸽子飞：扑棱
+  wings: { len: 0.7, f: (t, n) => n() * (0.5 + 0.5 * Math.sin(t * 70)) * env(t, 0.02, 0.3) * 0.35 },
+  // 赢
+  win: { len: 0.7, f: (t) => { const i = Math.min(3, Math.floor(t / 0.12)); const k = t - i * 0.12; return Math.sin(2 * Math.PI * [523, 659, 784, 1047][i] * t) * env(k, 0.005, i === 3 ? 0.25 : 0.1) * 0.4; } },
+  // 输
+  lose: { len: 0.7, f: (t) => Math.sin(2 * Math.PI * (440 - 260 * t) * t) * env(t, 0.01, 0.3) * 0.4 },
+  // 他开枪（打飞头盔）
+  enemyShot: { len: 0.5, f: (t, n) => n() * env(t, 0.002, 0.1) * 0.7 + Math.sin(2 * Math.PI * 90 * t) * env(t, 0.002, 0.15) * 0.6 },
+};
+
+function make(name, sr) {
+  const r = RECIPES[name];
+  if (!r) return null;
+  const n = Math.floor(r.len * sr);
+  const out = new Float32Array(n);
+  const rnd = noise(name.length * 7919);
+  for (let i = 0; i < n; i++) out[i] = Math.max(-1, Math.min(1, r.f(i / sr, rnd)));
+  return out;
+}
+
+module.exports = { make, NAMES: Object.keys(RECIPES) };
 
 });
 __def("js/team.js", function (module, exports, require) {
@@ -3284,7 +4430,7 @@ const BASES = [
   { name: '战队基地', mul: 1.5, cost: 0 },
 ];
 
-// 临场卡：打完一场三选一
+// 临场卡：关前带一张。按 CARD_ORDER 每第一次过一关解锁一张
 const CARDS = [
   { id: 'breath', name: '深呼吸', desc: '稳住多撑 1 秒', icon: 'lung', mods: { holdMaxAdd: 1 } },
   { id: 'scope', name: '好镜子', desc: '判定圈大一圈', icon: 'scope', mods: { hitRadiusAdd: 3 } },
@@ -3293,8 +4439,19 @@ const CARDS = [
   { id: 'silencer', name: '消音器', desc: '打空不暴露', icon: 'bullet', mods: { silent: true } },
   { id: 'helmet', name: '诱饵头盔', desc: '替你挨一枪，照出他', icon: 'helmet', mods: { helmets: 1 } },
   { id: 'ghillie', name: '伪装网', desc: '他找你慢三成', icon: 'leaf', mods: { enemyRateMul: 0.7 } },
-  { id: 'charm', name: '护身符', desc: '每场多拉一次', icon: 'charm', mods: { rescueAdd: 1 } },
+  { id: 'charm', name: '护身符', desc: '每关多拉一次', icon: 'charm', mods: { rescueAdd: 1 } },
   { id: 'hand', name: '快手', desc: '对枪多 0.3 秒', icon: 'hand', mods: { quickDrawAdd: 0.3 } },
+];
+
+const CARD_ORDER = ['breath', 'scope', 'ear', 'silencer', 'ghillie', 'helmet', 'gum', 'hand', 'charm'];
+const START_CARDS = 2;
+
+// 段位：按一共拿了几颗星
+const RANKS = [
+  { name: '新人', stars: 0 },
+  { name: '业余', stars: 6 },
+  { name: '半职业', stars: 14 },
+  { name: '职业', stars: 22 },
 ];
 
 const ADD = ['hitRadiusAdd', 'holdMaxAdd', 'quickDrawAdd', 'rescueAdd', 'helmets'];
@@ -3303,10 +4460,12 @@ const MUL = ['settleMul', 'heartMul', 'enemyRateMul', 'reloadMul'];
 function fresh() {
   const team = {};
   TEAMMATES.forEach((m) => (team[m.id] = 1));
-  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0 };
+  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0, stars: {}, cleared: [] };
 }
 
 let S = Object.assign(fresh(), platform.load(SAVE_KEY) || {});
+if (!S.stars) S.stars = {};
+if (!S.cleared) S.cleared = [];
 
 function save() {
   platform.save(SAVE_KEY, S);
@@ -3341,7 +4500,7 @@ function mods(cardIds) {
 
 // 练一级要花多少奖金。lv：现在几级（1~4），返回升到下一级的价钱。
 function trainCost(lv) {
-  // TODO(human): 写练级价钱的曲线。一场全赢大约拿 60 + 50 = 110，一次网吧赛全赢约 530。
+  // TODO(human): 写练级价钱的曲线。一关大约拿 20×回合数 + 10×星星，第一章全三星约 600。
   return 100 * lv;
 }
 
@@ -3365,16 +4524,42 @@ function upgradeBase() {
   return true;
 }
 
-function earn(kind) {
-  const n = Math.round(config.money[kind] * BASES[S.base].mul);
+// 拿奖金：times 份 config.money[kind]，乘训练基地倍数
+function earn(kind, times) {
+  const n = Math.round(config.money[kind] * (times === undefined ? 1 : times) * BASES[S.base].mul);
   S.money += n;
-  if (kind === 'perMatch') S.fans += 10;
-  if (kind === 'perCup') {
-    S.fans += 100;
-    S.cups += 1;
-  }
   save();
   return n;
+}
+
+// 过关记账：星星只记最好成绩；第一次过关加粉丝。返回 { first, newStars }
+function recordLevel(id, stars) {
+  const first = S.cleared.indexOf(id) < 0;
+  if (first) {
+    S.cleared.push(id);
+    S.fans += 10;
+  }
+  const old = S.stars[id] || 0;
+  if (stars > old) S.stars[id] = stars;
+  save();
+  return { first, newStars: Math.max(0, stars - old) };
+}
+
+function totalStars() {
+  return Object.keys(S.stars).reduce((a, k) => a + S.stars[k], 0);
+}
+
+function rank() {
+  const n = totalStars();
+  let r = RANKS[0];
+  RANKS.forEach((x) => n >= x.stars && (r = x));
+  return r;
+}
+
+// 已解锁的临场卡
+function unlockedCards() {
+  const n = Math.min(CARD_ORDER.length, START_CARDS + S.cleared.length);
+  return CARD_ORDER.slice(0, n).map((id) => CARDS.find((c) => c.id === id));
 }
 
 function reveal() {
@@ -3398,6 +4583,7 @@ module.exports = {
   TEAMMATES, BASES, CARDS, MAX_LV,
   state: () => S,
   save, reset, mods, trainCost, train, upgradeBase, earn, reveal, drawCards,
+  recordLevel, totalStars, rank, unlockedCards, RANKS,
 };
 
 });

@@ -33,7 +33,7 @@ const BASES = [
   { name: '战队基地', mul: 1.5, cost: 0 },
 ];
 
-// 临场卡：打完一场三选一
+// 临场卡：关前带一张。按 CARD_ORDER 每第一次过一关解锁一张
 const CARDS = [
   { id: 'breath', name: '深呼吸', desc: '稳住多撑 1 秒', icon: 'lung', mods: { holdMaxAdd: 1 } },
   { id: 'scope', name: '好镜子', desc: '判定圈大一圈', icon: 'scope', mods: { hitRadiusAdd: 3 } },
@@ -42,8 +42,19 @@ const CARDS = [
   { id: 'silencer', name: '消音器', desc: '打空不暴露', icon: 'bullet', mods: { silent: true } },
   { id: 'helmet', name: '诱饵头盔', desc: '替你挨一枪，照出他', icon: 'helmet', mods: { helmets: 1 } },
   { id: 'ghillie', name: '伪装网', desc: '他找你慢三成', icon: 'leaf', mods: { enemyRateMul: 0.7 } },
-  { id: 'charm', name: '护身符', desc: '每场多拉一次', icon: 'charm', mods: { rescueAdd: 1 } },
+  { id: 'charm', name: '护身符', desc: '每关多拉一次', icon: 'charm', mods: { rescueAdd: 1 } },
   { id: 'hand', name: '快手', desc: '对枪多 0.3 秒', icon: 'hand', mods: { quickDrawAdd: 0.3 } },
+];
+
+const CARD_ORDER = ['breath', 'scope', 'ear', 'silencer', 'ghillie', 'helmet', 'gum', 'hand', 'charm'];
+const START_CARDS = 2;
+
+// 段位：按一共拿了几颗星
+const RANKS = [
+  { name: '新人', stars: 0 },
+  { name: '业余', stars: 6 },
+  { name: '半职业', stars: 14 },
+  { name: '职业', stars: 22 },
 ];
 
 const ADD = ['hitRadiusAdd', 'holdMaxAdd', 'quickDrawAdd', 'rescueAdd', 'helmets'];
@@ -52,10 +63,12 @@ const MUL = ['settleMul', 'heartMul', 'enemyRateMul', 'reloadMul'];
 function fresh() {
   const team = {};
   TEAMMATES.forEach((m) => (team[m.id] = 1));
-  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0 };
+  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0, stars: {}, cleared: [] };
 }
 
 let S = Object.assign(fresh(), platform.load(SAVE_KEY) || {});
+if (!S.stars) S.stars = {};
+if (!S.cleared) S.cleared = [];
 
 function save() {
   platform.save(SAVE_KEY, S);
@@ -90,7 +103,7 @@ function mods(cardIds) {
 
 // 练一级要花多少奖金。lv：现在几级（1~4），返回升到下一级的价钱。
 function trainCost(lv) {
-  // TODO(human): 写练级价钱的曲线。一场全赢大约拿 60 + 50 = 110，一次网吧赛全赢约 530。
+  // TODO(human): 写练级价钱的曲线。一关大约拿 20×回合数 + 10×星星，第一章全三星约 600。
   return 100 * lv;
 }
 
@@ -114,16 +127,42 @@ function upgradeBase() {
   return true;
 }
 
-function earn(kind) {
-  const n = Math.round(config.money[kind] * BASES[S.base].mul);
+// 拿奖金：times 份 config.money[kind]，乘训练基地倍数
+function earn(kind, times) {
+  const n = Math.round(config.money[kind] * (times === undefined ? 1 : times) * BASES[S.base].mul);
   S.money += n;
-  if (kind === 'perMatch') S.fans += 10;
-  if (kind === 'perCup') {
-    S.fans += 100;
-    S.cups += 1;
-  }
   save();
   return n;
+}
+
+// 过关记账：星星只记最好成绩；第一次过关加粉丝。返回 { first, newStars }
+function recordLevel(id, stars) {
+  const first = S.cleared.indexOf(id) < 0;
+  if (first) {
+    S.cleared.push(id);
+    S.fans += 10;
+  }
+  const old = S.stars[id] || 0;
+  if (stars > old) S.stars[id] = stars;
+  save();
+  return { first, newStars: Math.max(0, stars - old) };
+}
+
+function totalStars() {
+  return Object.keys(S.stars).reduce((a, k) => a + S.stars[k], 0);
+}
+
+function rank() {
+  const n = totalStars();
+  let r = RANKS[0];
+  RANKS.forEach((x) => n >= x.stars && (r = x));
+  return r;
+}
+
+// 已解锁的临场卡
+function unlockedCards() {
+  const n = Math.min(CARD_ORDER.length, START_CARDS + S.cleared.length);
+  return CARD_ORDER.slice(0, n).map((id) => CARDS.find((c) => c.id === id));
 }
 
 function reveal() {
@@ -147,4 +186,5 @@ module.exports = {
   TEAMMATES, BASES, CARDS, MAX_LV,
   state: () => S,
   save, reset, mods, trainCost, train, upgradeBase, earn, reveal, drawCards,
+  recordLevel, totalStars, rank, unlockedCards, RANKS,
 };
