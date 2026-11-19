@@ -243,7 +243,7 @@ const fs = require('fs');
   await page.waitForFunction(() => !__vasily.G.duel.relocating, null, { timeout: 4000 });
   await shootSniper();
   await page.waitForFunction(() => !__vasily.G.duel.relocating, null, { timeout: 4000 });
-  check(await g(() => __vasily.G.duel.sc.figures.filter((f) => f.kind === 'decoy').length >= 2 && __vasily.G.duel.tactic().fog), 'Boss 第三段：摆两个假人，还起雾');
+  check(await g(() => __vasily.G.duel.sc.figures.filter((f) => f.kind === 'decoy').length >= 2 && __vasily.G.duel.tactic().cover === 'steam'), 'Boss 第三段：摆两个假人，还放蒸汽');
   await shootSniper();
   await page.waitForFunction(() => __vasily.G.mode === 'result', null, { timeout: 5000 });
   await page.waitForTimeout(2500);
@@ -291,22 +291,84 @@ const fs = require('fs');
   await page.mouse.click(...at(btn.trig));
   check((await g(() => __vasily.G.classic.shots)) === 0, '原作样机：望远镜状态下不能开枪');
 
-  // 公平：九张背景、几百个随机局，每个人影都在能瞄到的地方
+  // 公平：十二张地图、几百个随机局，每个人影都在能瞄到的地方，也不跟误导物、会变的东西挤一扇窗
   const fair = await g(() => {
     const { scene, D } = __vasily;
-    const ids = ['oldtown', 'market', 'tanks', 'port', 'station', 'factory', 'neon', 'desert', 'eaves'];
-    let bad = 0, short = 0;
-    for (let s = 1; s <= 300; s++) {
-      const sc = scene.build(s * 7, { poseShift: 3, contrast: 0.2 }, D, ids[s % 9], { figures: 8, decoys: 2, props: 14 });
+    const ids = __require('')('./js/themes.js').MAP_ORDER;
+    let bad = 0, short = 0, clash = 0;
+    for (let s = 1; s <= 600; s++) {
+      const sc = scene.build(s * 7, { poseShift: 3, contrast: 0.2 }, D, ids[s % ids.length], { figures: 8, decoys: 2, props: 14 });
       if (sc.figures.length < 10) short++;
       sc.figures.forEach((f) => {
         const h = scene.figureHead(f, 1);
         if (h.x < D / 2 - 8 || h.x > sc.w - D / 2 + 8 || h.y < D / 2 || h.y > sc.h - D / 2) bad++;
+        if (scene.slotBusy(sc, f.win)) clash++;
       });
     }
-    return { bad, short };
+    return { bad, short, clash, n: ids.length };
   });
-  check(fair.bad === 0 && fair.short === 0, '九张背景 300 个随机局：八个人影加两个假人都摆得下，而且都能瞄到');
+  check(fair.n === 12 && fair.bad === 0 && fair.short === 0 && fair.clash === 0, '十二张地图 600 个随机局：八个人影加两个假人都摆得下、都能瞄到，不跟误导物挤一扇窗');
+
+  // 第一章换了地图：沙漠土楼镇开场，城市在第五关（Cc 定）
+  const maps = await g(() => __vasily.LV.LEVELS.map((lv) => lv.rounds[0].theme).join(','));
+  check(maps === 'desert,med,station,port,oldtown,farm,temple,castle,plant', '第一章九关九张地图：沙漠开场，城市在第五关，Boss 在电厂');
+
+  // 遮挡：火车挡住他那扇窗时他看不见你，子弹也打在车厢上；玻璃反光只晃你的眼，不挡他
+  const cov = await g(() => {
+    const config = __vasily.config;
+    const { createDuel } = __require('')('./js/duel.js');
+    const scene = __vasily.scene;
+    const R = { opp: 'patient', theme: 'station', figures: 4, props: 6, goal: 'kill', bullets: 3, time: 80, hitR: 7, cover: 'train' };
+    const d = createDuel({ seed: 5, config, scopeD: __vasily.D, round: R, levelIndex: 2 });
+    const h = scene.enemyHead(d.sc, 1);
+    d.sc.covers.push({ kind: 'train', x: h.x - 100, y: h.y - 40, w: 300, h: 80, a: 1, age: 0 });
+    const blind = d.enemyBlind();
+    d.sc.enemy.lift = 1;
+    d.cam.x = h.x; d.cam.y = h.y; d.sway = { x: 0, y: 0 };
+    d.update = () => {};
+    d.holding = true;
+    const shot = d.triggerUp();
+    const g2 = createDuel({ seed: 5, config, scopeD: __vasily.D, round: Object.assign({}, R, { theme: 'glass', cover: 'glare' }), levelIndex: 2 });
+    const h2 = scene.enemyHead(g2.sc, 1);
+    g2.sc.covers.push({ kind: 'glare', x: h2.x - 30, y: 0, w: 60, h: 600, a: 1, age: 0 });
+    // 烟雾弹：废墟里打一阵，烟扔在他附近
+    const r3 = createDuel({ seed: 9, config, scopeD: __vasily.D, round: Object.assign({}, R, { theme: 'ruins', cover: 'auto' }), levelIndex: 2 });
+    let near = false;
+    for (let i = 0; i < 60 * 25 && !near; i++) {
+      r3.update(1 / 60); r3.state = 'play'; r3.timeLeft = 80; r3.duck = 1; r3.duckHeld = true;
+      const e = r3.sc.enemy.win;
+      near = r3.sc.covers.some((c) => c.kind === 'smoke' && Math.hypot(c.x - e.x, c.y - e.y) < 160);
+    }
+    // 地图自带的遮挡：擂台、每日从十二张里抽，都带上
+    const kinds = __require('')('./js/themes.js').MAP_ORDER.map((id) => createDuel({ seed: 1, config, scopeD: __vasily.D, round: Object.assign({}, R, { theme: id, cover: 'auto' }), levelIndex: 2 }).coverKind()).filter(Boolean).length;
+    return { blind, shot: shot && shot.kind, glareBlind: g2.enemyBlind(), smoke: near, kinds };
+  });
+  check(cov.blind && cov.shot === 'covered', '火车开过：挡住他那扇窗时他看不见你，子弹打在车厢上');
+  check(!cov.glareBlind, '玻璃反光只晃你的眼，不挡他的视线');
+  check(cov.smoke, '战地废墟：他把烟雾弹扔在自己附近');
+  check(cov.kinds === 6, '六张地图自带遮挡：火车、蒸汽、烟雾弹、沙尘暴、水雾、玻璃反光');
+
+  // Midjourney 背景图接口：一张图 + 藏身位标记 = 一张地图（这里拿一张假图试）
+  const art = await g(() => {
+    const { scene, D } = __vasily;
+    const ref = scene.build(3, { poseShift: 3, contrast: 0.2 }, D, 'oldtown', { figures: 8, decoys: 0, props: 14 });
+    const slots = ref.allWindows.filter((w) => !w.bricked).map((w) => [w.x, w.y, w.w, w.h]);
+    const tops = ref.buildings.map((b) => [b.x, b.x + b.w, b.y]);
+    const c = document.createElement('canvas');
+    c.width = 860; c.height = 600;
+    const x = c.getContext('2d');
+    x.fillStyle = '#c9705a'; x.fillRect(0, 0, 860, 600);
+    scene.registerArt('oldtown', c, { slots, tops });
+    const sc = scene.build(4, { poseShift: 3, contrast: 0.2 }, D, 'oldtown', { figures: 8, decoys: 2, props: 14 });
+    const key = (w) => w.x + ',' + w.y;
+    const set = new Set(slots.map((s) => s[0] + ',' + s[1]));
+    const inside = sc.figures.every((f) => set.has(key(f.win))) && sc.props.every((p) => set.has(key(p.win)));
+    const cv = document.createElement('canvas');
+    cv.width = 400; cv.height = 400;
+    scene.draw(cv.getContext('2d'), sc, { x: 430, y: 300 }, 200, 200, 352, { t: 1, fog: 0 });
+    return { img: !!sc.image, inside, n: sc.figures.length };
+  });
+  check(art.img && art.inside && art.n === 10, '背景图接口：有图就贴图，人影和误导物都放进标好的藏身位');
 
   check(errors.length === 0, '没有报错' + (errors.length ? '：' + errors.join(' | ') : ''));
   await browser.close();

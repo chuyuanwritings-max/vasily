@@ -1,7 +1,7 @@
 // 第一章 · 网吧赛：8 关 + Boss。一关 = 1~3 个回合（每个回合一个狙击手，中间换点位）。
 // 手工排的顺序：每种新东西第一次出现时单独教（teach 是关前那一页的几句话）。
 //
-// 回合字段：opp 对手（config.opponents）；theme 背景（themes.js）；figures 对面一共几个人影（含狙击手）；
+// 回合字段：opp 对手（config.opponents）；theme 地图（themes.js）；cover 遮挡（config.covers，'auto' = 地图自带的）；figures 对面一共几个人影（含狙击手）；
 //   cond 地图条件 fog / night / pigeons；goal 目标 kill / escort；bullets 子弹；time 秒；hitR 判定圈
 // 星星：每关两条附加条件，加上过关一颗
 //   noMiss 一发没浪费；noLock 没被他瞄准过；noRescue 没叫队友拉人；fast 总用时 ≤ fastSec 秒
@@ -22,21 +22,21 @@ const CHAPTERS = [
         id: 'c1', name: '第一枪',
         teach: [['只有一个是狙击手', '缩一下头，看谁挪了']],
         stars: ['noMiss', 'noLock'],
-        rounds: [{ opp: 'patient', theme: 'oldtown', figures: 4, goal: 'kill', bullets: 3, time: 90, hitR: 7, props: 6 }],
+        rounds: [{ opp: 'patient', theme: 'desert', figures: 4, goal: 'kill', bullets: 3, time: 90, hitR: 7, props: 6 }],
       },
       {
         id: 'c2', name: '谁在闪',
         teach: [['红圈压到你身边时，他的镜片会闪', '路人的手机也会闪']],
         stars: ['noMiss', 'fast'], fastSec: 50,
-        rounds: [{ opp: 'patient', theme: 'market', figures: 6, goal: 'kill', bullets: 3, time: 80, hitR: 7, props: 10 }],
+        rounds: [{ opp: 'patient', theme: 'med', figures: 6, goal: 'kill', bullets: 3, time: 80, hitR: 7, props: 10 }],
       },
       {
         id: 'c3', name: '换个窗',
-        teach: [['点下面的另一扇窗 = 换窗', '同一扇窗露头三次，他就记住了']],
+        teach: [['点下面的另一扇窗 = 换窗', '同一扇窗露头三次，他就记住了']], // 地图：雨夜货运站，火车开过挡住下面几排
         stars: ['noLock', 'noRescue'],
         rounds: [
-          { opp: 'nervous', theme: 'tanks', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6.5, props: 10 },
-          { opp: 'nervous', theme: 'tanks', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6.5, props: 10 },
+          { opp: 'nervous', theme: 'station', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6.5, props: 10, cover: 'train' },
+          { opp: 'nervous', theme: 'station', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6.5, props: 10, cover: 'train' },
         ],
       },
       {
@@ -53,23 +53,23 @@ const CHAPTERS = [
         teach: [['头盔假人：缩头再起来时它不挪', '打错扣 8 秒']],
         stars: ['noMiss', 'fast'], fastSec: 110,
         rounds: [
-          { opp: 'sly', theme: 'station', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6, props: 12 },
-          { opp: 'sly', theme: 'station', figures: 7, goal: 'kill', bullets: 3, time: 75, hitR: 6, props: 12 },
+          { opp: 'sly', theme: 'oldtown', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6, props: 12 },
+          { opp: 'sly', theme: 'oldtown', figures: 7, goal: 'kill', bullets: 3, time: 75, hitR: 6, props: 12 },
         ],
       },
       {
         id: 'c6', name: '掩护小雨',
         teach: [['掩护街上的小雨', '他瞄小雨时没在看你']],
         stars: ['noLock', 'noRescue'],
-        rounds: [{ opp: 'nervous', theme: 'factory', figures: 6, goal: 'escort', bullets: 3, time: 90, hitR: 6, props: 10 }],
+        rounds: [{ opp: 'nervous', theme: 'farm', figures: 6, goal: 'escort', bullets: 3, time: 90, hitR: 6, props: 10 }],
       },
       {
         id: 'c7', name: '鸽子',
-        teach: [['鸽子飞起来的那栋楼：他就在里面', '']],
+        teach: [['鸟飞起来的地方：他就在那附近', '']],
         stars: ['noMiss', 'noLock'],
         rounds: [
-          { opp: 'mover', theme: 'desert', figures: 7, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 5.5, props: 14 },
-          { opp: 'mover', theme: 'desert', figures: 8, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 5.5, props: 14 },
+          { opp: 'mover', theme: 'temple', figures: 7, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 5.5, props: 14 },
+          { opp: 'mover', theme: 'temple', figures: 8, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 5.5, props: 14 },
         ],
       },
       {
@@ -77,16 +77,16 @@ const CHAPTERS = [
         teach: [['夜里看反光', '每回合只有一发']],
         stars: ['noLock', 'fast'], fastSec: 100,
         rounds: [
-          { opp: 'patient', theme: 'neon', figures: 6, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 5.5, props: 12 },
-          { opp: 'sly', theme: 'neon', figures: 7, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 5.5, props: 12 },
+          { opp: 'patient', theme: 'castle', figures: 6, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 5.5, props: 12 },
+          { opp: 'sly', theme: 'castle', figures: 7, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 5.5, props: 12 },
         ],
       },
       {
         id: 'c9', name: 'Boss · 老枪', boss: true, needStars: 10,
         bossIntro: ['网吧里没人赢过他', '三条命：每挨一枪，他换一招'],
-        teach: [['三条命，每挨一枪换一招', '']],
+        teach: [['三条命，每挨一枪换一招', '最后一招：蒸汽']],
         stars: ['noRescue', 'noLock'],
-        rounds: [{ opp: 'boss', theme: 'eaves', figures: 8, goal: 'kill', bullets: 3, time: 120, hitR: 5, props: 14 }],
+        rounds: [{ opp: 'boss', theme: 'plant', figures: 8, goal: 'kill', bullets: 3, time: 120, hitR: 5, props: 14 }],
       },
     ],
   },
@@ -106,11 +106,12 @@ const ARENA_MODS = [
   { id: 'fast2', name: '他找得再快一点', f: (R) => { R.seekMul = (R.seekMul || 1) * 1.2; } },
 ];
 const RANDOM_OPPS = ['patient', 'nervous', 'sly', 'mover'];
-const RANDOM_THEMES = ['oldtown', 'market', 'tanks', 'port', 'station', 'factory', 'neon', 'desert', 'eaves'];
+// 0.7：擂台、每日挑战从十二张地图里抽，地图自带的遮挡（火车、蒸汽……）也一起来
+const RANDOM_THEMES = require('./themes.js').MAP_ORDER;
 
 // 擂台的下一个回合：随机对手和背景，再叠上已经攒下的加难
 function arenaRound(modIds, rand) {
-  const R = { opp: RANDOM_OPPS[Math.floor(rand() * RANDOM_OPPS.length)], theme: RANDOM_THEMES[Math.floor(rand() * RANDOM_THEMES.length)], figures: 5, props: 10, goal: 'kill', bullets: 3, time: 70, hitR: 6.5 };
+  const R = { opp: RANDOM_OPPS[Math.floor(rand() * RANDOM_OPPS.length)], theme: RANDOM_THEMES[Math.floor(rand() * RANDOM_THEMES.length)], figures: 5, props: 10, goal: 'kill', bullets: 3, time: 70, hitR: 6.5, cover: 'auto' };
   modIds.forEach((id) => ARENA_MODS.find((m) => m.id === id).f(R));
   return R;
 }
@@ -131,7 +132,7 @@ function dailyRounds(day, rngFn) {
     opp: RANDOM_OPPS[Math.floor(r() * RANDOM_OPPS.length)],
     theme: RANDOM_THEMES[Math.floor(r() * RANDOM_THEMES.length)],
     cond: i === 0 ? null : conds[Math.floor(r() * conds.length)],
-    figures: 6 + i, props: 12, goal: 'kill', bullets: 3, time: 75, hitR: 6,
+    figures: 6 + i, props: 12, goal: 'kill', bullets: 3, time: 75, hitR: 6, cover: 'auto',
   }));
 }
 

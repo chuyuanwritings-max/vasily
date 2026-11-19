@@ -165,8 +165,20 @@ function save(key, value) {
   }
 }
 
+// 载入一张图（Midjourney 背景）。载不到就不回调：游戏照样用代码画
+function loadImage(src, onLoad) {
+  try {
+    const img = isWx ? wx.createImage() : new Image();
+    img.onload = () => onLoad(img);
+    img.onerror = () => {};
+    img.src = src;
+  } catch (e) {
+    // 没有图就算了
+  }
+}
+
 function exposeForTest(name, value) {
   if (!isWx && typeof window !== 'undefined') window[name] = value;
 }
 
-module.exports = { isWx, setup, now, nextFrame, vibrate, showRewardedAd, load, save, exposeForTest, sound, unlockAudio, setMuted };
+module.exports = { isWx, setup, now, nextFrame, vibrate, showRewardedAd, load, save, exposeForTest, sound, unlockAudio, setMuted, loadImage };

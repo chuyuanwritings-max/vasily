@@ -2,7 +2,7 @@
 // 单位：时间是秒（blinkMs 是毫秒），距离是屏幕上的点（375 宽的手机上量）。
 
 const config = {
-  version: '瓦西里 · 原型 0.6',
+  version: '瓦西里 · 原型 0.7',
 
   // 激励视频广告位 id。空着 = 放「广告占位」倒计时；上线前填后台建的 id。
   rewardedAdUnitId: '',
@@ -63,7 +63,7 @@ const config = {
       seekSpeed: 3, heatRate: 0.15, lockSec: 0.65, quickDraw: 0.75, poseShift: 2, mover: true },
     boss: { name: '老枪', tell: '三条命，每挨一枪换一招', hideMin: 1.4, hideMax: 2.2, peekSec: 2.2,
       seekSpeed: 3.2, heatRate: 0.16, lockSec: 0.6, quickDraw: 0.7, poseShift: 2,
-      phases: [{ still: true }, { mover: true, seekSpeed: 3.6 }, { decoy: 2, tap: true, seekSpeed: 4, fog: true }] },
+      phases: [{ still: true }, { mover: true, seekSpeed: 3.6 }, { decoy: 2, tap: true, seekSpeed: 4, cover: 'steam' }] },
   },
 
   // 地图条件
@@ -71,6 +71,17 @@ const config = {
     fog: { name: '大雾', thickSec: 5, clearSec: 2.5, heatMul: 0.3 }, // 浓雾时他也看不清你
     night: { name: '夜里', heatMul: 0.8 },
     pigeons: { name: '鸽群', flushHeat: 0.25, backSec: 9 },
+  },
+
+  // 0.7 地图自带的遮挡：挡住他那扇窗时他看不见你（玻璃反光除外，那是给你的假反光）。火车还挡子弹。
+  // every：隔几秒来一次；speed：每秒走多远；life：一团能留几秒；fade：最后几秒在散
+  covers: {
+    train: { name: '火车', every: [8, 13], speed: 260, len: 620, h: 72 },
+    steam: { name: '蒸汽', every: [2.5, 4.5], r: 62, life: 3.8, fade: 1.2, nearHim: 0.35 },
+    smoke: { name: '烟雾弹', every: [13, 19], r: 88, life: 7, fade: 3, off: [30, 110] },
+    sand: { name: '沙尘暴', every: [7, 11], w: 300, speed: 170 },
+    mist: { name: '水雾', period: 7, r: 120 },
+    glare: { name: '玻璃反光', every: [5, 8], w: 70, speed: 300 },
   },
 
   // 掩护队友过街

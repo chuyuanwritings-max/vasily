@@ -233,7 +233,7 @@ function startClassic() {
 }
 
 function goTitle() {
-  const ids = themes.ORDER;
+  const ids = themes.MAP_ORDER;
   const id = ids[Math.floor(Math.random() * ids.length)];
   G.title = { sc: scene.build(Math.floor(Math.random() * 99999), { poseShift: 3, contrast: 0.2 }, D, id) };
   setMode('title');
@@ -447,6 +447,8 @@ function handleEvents(d) {
       G.bossHitT = 0;
       G.say = { text: ev.hp === 1 ? '最后一条命！' : '还没完！', color: '#ff4d5e', t: 1.6 };
     } else if (ev.kind === 'mateSafe') { sfx('coin'); G.say = { text: '小雨安全了！', color: '#90ee90', t: 1.4 }; }
+    else if (ev.kind === 'train') sfx('crawl', 0.7);
+    else if (ev.kind === 'smoke') { sfx('duck', 0.6); G.say2 = { text: '他扔了烟雾弹', t: 1.2 }; }
   }
 }
 
@@ -725,8 +727,11 @@ function drawHud() {
     ctx.stroke();
     cut.cardIcon(ctx, c.icon, cx, 34, 0.44);
   }
-  // 地图条件
-  if (d.cond) text(config.conditions[d.cond].name, L.W - 46, 34, 11, '#c9c2e0', 'right', 800);
+  // 地图条件、地图自带的遮挡
+  const tags = [];
+  if (d.cond) tags.push(config.conditions[d.cond].name);
+  if (d.coverKind()) tags.push(config.covers[d.coverKind()].name);
+  if (tags.length) text(tags.join(' · '), L.W - 46, 34, 11, '#c9c2e0', 'right', 800);
 
   if (d.drawLeft >= 0) {
     comicText(ctx, d.exposed() ? '他瞄准你了！' : '他盯着你的窗口', scopeC.x, scopeC.y - D / 2 + 30, d.exposed() ? 26 : 18, '#ff4d5e');
@@ -1631,7 +1636,8 @@ function render() {
   if (m === 'intro') {
     const R = G.duel.round;
     const o = G.duel.opp;
-    const sub = G.duel.sc.theme.name + ' · ' + o.name + (R.cond ? ' · ' + config.conditions[R.cond].name : '');
+    const ck = G.duel.coverKind();
+    const sub = G.duel.sc.theme.name + ' · ' + o.name + (R.cond ? ' · ' + config.conditions[R.cond].name : '') + (ck ? ' · ' + config.covers[ck].name : '');
     const title = G.arena ? '擂台 · 第 ' + (G.arena.streak + 1) + ' 个' : G.level.rounds.length > 1 ? (G.daily ? '每日 ' : '') + '回合 ' + (G.roundIdx + 1) + ' / ' + G.level.rounds.length : '第 ' + G.level.no + ' 关';
     comicPanel(title, sub, '破绽：' + o.tell);
   } else if (m === 'ammoGift') {
@@ -1678,6 +1684,10 @@ function frame() {
   render();
   platform.nextFrame(frame);
 }
+
+// Midjourney 背景图：有标记的就去载图，载到了那张地图就换成图
+const bgslots = require('./bgslots.js');
+Object.keys(bgslots).forEach((id) => platform.loadImage(bgslots[id].image, (img) => scene.registerArt(id, img, bgslots[id])));
 
 goTitle();
 platform.exposeForTest('__vasily', { startArena, startDaily, retryRound, G, config, scene, team, cut, LV, scopeC, D, eyeBtn, trigBtn, panelR, scale, setMode, openLevel, startLevel, startRound, afterHit, finishLevel, goMap, startClassic, levelUnlocked });

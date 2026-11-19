@@ -13,6 +13,7 @@
 //   换窗：点下面那栋楼的另一扇窗，爬过去，他对你位置的把握清零。
 //   他会学你：同一扇窗露头第三次，他已经预先瞄着那里。
 const scene = require('./scene.js');
+const themes = require('./themes.js');
 const { clamp, lerp, easeOut, rng } = require('./util.js');
 
 const RISE_SEC = 0.25; // 他探头、缩头的动作要多久
@@ -45,6 +46,8 @@ function createDuel(opts) {
   const half = opts.scopeD / 2;
   const rand = rng(opts.seed ^ 0x5bd1e995);
   const S = cfg.seek;
+  // 这回合的遮挡：关卡写明的，或者 'auto' = 用这张地图自带的（擂台、每日挑战）
+  const roundCover = R.cover === 'auto' ? themes.get(R.theme).cover : R.cover || null;
 
   const d = {
     sc,
@@ -84,6 +87,7 @@ function createDuel(opts) {
     stare: 0, // 你盯着他看了多久（换位型会跑）
     relocating: false,
     fog: 0,
+    coverNext: 2.5, // 下一次遮挡还有几秒
     // 开枪
     heart: 1,
     holding: false,
@@ -112,6 +116,67 @@ function createDuel(opts) {
     return t;
   }
   d.tactic = tactic;
+  // 现在这一招带什么遮挡（Boss 第三招放蒸汽）
+  d.coverKind = function () {
+    return tactic().cover || roundCover;
+  };
+
+  // —— 挡视线的东西：火车、蒸汽、烟雾弹、沙尘暴、水雾、玻璃反光 ——
+  // 挡住他那扇窗时（玻璃反光除外），他看不见你：不升温、不锁定。火车还挡子弹。
+  function spawnCover(kind) {
+    const C = cfg.covers[kind];
+    const pick = (a) => a[0] + rand() * (a[1] - a[0]);
+    const ew = sc.enemy.win;
+    if (kind === 'train') sc.covers.push({ kind, x: -C.len, y: scene.GROUND - C.h, w: C.len, h: C.h, a: 1, age: 0 });
+    else if (kind === 'sand') sc.covers.push({ kind, x: -C.w, y: 100, w: C.w, h: scene.GROUND - 100, a: 0.92, age: 0 });
+    else if (kind === 'glare') sc.covers.push({ kind, x: -C.w - 60, y: 0, w: C.w, h: scene.WORLD_H, a: 1, age: 0 });
+    else if (kind === 'mist') sc.covers.push({ kind, x: 60, y: 430, r: C.r, a: 0.5, age: 0, seed: rand() * 6 });
+    else if (kind === 'steam') {
+      const w = rand() < C.nearHim ? ew : sc.allWindows[Math.floor(rand() * sc.allWindows.length)];
+      sc.covers.push({ kind, x: w.x + 8 + (rand() - 0.5) * 80, y: w.y + 11 + (rand() - 0.5) * 30, r: C.r, R: C.r, a: 0, age: 0, life: C.life, seed: rand() * 6 });
+    } else if (kind === 'smoke') {
+      // 烟雾弹扔在他附近：烟一起来，就知道他大概在那一片
+      const side = rand() < 0.5 ? -1 : 1;
+      sc.covers.push({ kind, x: ew.x + 8 + side * pick(C.off), y: ew.y + 11 + (rand() - 0.5) * 40, r: C.r, R: C.r, a: 0, age: 0, life: C.life, seed: rand() * 6 });
+      d.events.push({ kind: 'smoke' });
+    }
+    if (kind === 'train') d.events.push({ kind: 'train' });
+    return C;
+  }
+  function updateCovers(dt) {
+    sc.covers.forEach((c) => {
+      c.age += dt;
+      const C = cfg.covers[c.kind];
+      if (c.kind === 'train' || c.kind === 'sand' || c.kind === 'glare') c.x += C.speed * dt;
+      else if (c.kind === 'mist') c.a = 0.45 + 0.45 * Math.sin((d.t / C.period) * Math.PI * 2);
+      else {
+        const grow = Math.min(1, c.age / 0.7);
+        c.r = c.R * (0.5 + 0.5 * grow);
+        c.a = grow * clamp((c.life - c.age) / C.fade, 0, 1);
+      }
+    });
+    sc.covers = sc.covers.filter((c) => (c.life ? c.age < c.life : c.kind === 'mist' || c.x < scene.WORLD_W + 80));
+    const kind = d.coverKind();
+    if (!kind) {
+      sc.covers = sc.covers.filter((c) => c.life); // 换招以后火车、沙尘这类不再来，已有的烟让它自己散
+      return;
+    }
+    if (kind === 'mist') {
+      if (!sc.covers.some((c) => c.kind === 'mist')) spawnCover('mist');
+      return;
+    }
+    d.coverNext -= dt;
+    if (d.coverNext <= 0) {
+      const C = spawnCover(kind);
+      d.coverNext = C.every[0] + rand() * (C.every[1] - C.every[0]);
+    }
+  }
+  // 他被挡住了吗（看不见你）
+  function enemyBlind() {
+    const h = scene.enemyHead(sc, 1);
+    return scene.coverAt(sc, h.x, h.y, true) > 0.6;
+  }
+  d.enemyBlind = enemyBlind;
   sc.enemy.swayOn = !tactic().still;
   pickTarget();
 
@@ -220,7 +285,10 @@ function createDuel(opts) {
     const head = scene.enemyHead(sc, 1);
     const dist = Math.hypot(aim.x - head.x, aim.y - head.y);
     let kind = null;
-    if (d.enemyExposed() && dist <= d.hitRadius) kind = 'hit';
+    // 火车挡在前面：子弹打在车厢上
+    const trainHit = sc.covers.some((c) => c.kind === 'train' && aim.x >= c.x && aim.x <= c.x + c.w && aim.y >= c.y && aim.y <= c.y + c.h);
+    if (trainHit) kind = 'covered';
+    if (!kind && d.enemyExposed() && dist <= d.hitRadius) kind = 'hit';
     if (!kind) {
       const other = sc.figures.find((f) => f !== sc.enemy && f.lift > 0.4 && Math.hypot(aim.x - scene.figureHead(f).x, aim.y - scene.figureHead(f).y) <= OTHER_R);
       if (other) kind = other.kind === 'decoy' ? 'decoy' : 'wrong';
@@ -276,7 +344,7 @@ function createDuel(opts) {
     const want = tc.decoy || 0;
     const have = sc.figures.filter((f) => f.kind === 'decoy').length;
     for (let i = have; i < want; i++) {
-      const free = sc.spots.filter((w) => !sc.figures.some((f) => Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 60));
+      const free = sc.spots.filter((w) => !scene.slotBusy(sc, w) && !sc.figures.some((f) => Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 60));
       if (!free.length) break;
       const w = free[Math.floor(rand() * free.length)];
       sc.figures.push({ kind: 'decoy', win: w, lift: 0, pose: 0, shift: 0, color: sc.enemy.color, sway: 0, swayOn: false, phase: 0, timer: 1 });
@@ -376,8 +444,9 @@ function createDuel(opts) {
         s.dwell -= dt;
         if (s.dwell <= 0) pickTarget();
       }
-      if (d.exposed()) d.heat = Math.min(1, d.heat + tc.heatRate * heatMul() * dt);
-      if (onMe() && d.exposed()) {
+      const blind = enemyBlind();
+      if (d.exposed() && !blind) d.heat = Math.min(1, d.heat + tc.heatRate * heatMul() * dt);
+      if (onMe() && d.exposed() && !blind) {
         d.lock += dt / tc.lockSec;
         if (d.lock >= 1) {
           d.lock = 1;
@@ -571,6 +640,7 @@ function createDuel(opts) {
     }
 
     updateFog();
+    updateCovers(dt);
     updateFigures(dt);
     updateEnemy(dt);
     updateSeek(dt);
