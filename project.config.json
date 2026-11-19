@@ -3,14 +3,37 @@
   "compileType": "game",
   "appid": "touristappid",
   "projectname": "vasily",
-  "setting": { "es6": true, "minified": true, "urlCheck": true },
+  "setting": {
+    "es6": true,
+    "minified": true,
+    "urlCheck": true
+  },
   "packOptions": {
     "ignore": [
-      { "type": "folder", "value": "tools" },
-      { "type": "folder", "value": "test" },
-      { "type": "file", "value": "preview.html" },
-      { "type": "file", "value": "index.html" },
-      { "type": "file", "value": "README.md" }
+      {
+        "type": "folder",
+        "value": "tools"
+      },
+      {
+        "type": "folder",
+        "value": "test"
+      },
+      {
+        "type": "file",
+        "value": "preview.html"
+      },
+      {
+        "type": "file",
+        "value": "index.html"
+      },
+      {
+        "type": "file",
+        "value": "README.md"
+      },
+      {
+        "type": "folder",
+        "value": "生图"
+      }
     ]
   }
 }
