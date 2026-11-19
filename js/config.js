@@ -2,7 +2,7 @@
 // 单位：时间是秒（blinkMs 是毫秒），距离是屏幕上的点（375 宽的手机上量）。
 
 const config = {
-  version: '瓦西里 · 原型 0.5',
+  version: '瓦西里 · 原型 0.6',
 
   // 激励视频广告位 id。空着 = 放「广告占位」倒计时；上线前填后台建的 id。
   rewardedAdUnitId: '',
@@ -25,14 +25,15 @@ const config = {
   },
 
   // 屏息时，准星离他的头够近，会被轻轻吸过去。按关卡序号（从 0 起）查表，查不到就是 0
-  assist: { radius: [10, 10, 8, 6, 5, 4, 3, 0, 0], perSec: 3 },
+  // 0.6：Cc 说瞄准太简单，全部关掉
+  assist: { radius: [], perSec: 3 },
 
   // 他的镜子怎么在你这栋楼上找你（画面下方的红圈）
   seek: {
     spread: 0.6, // 他刚开始乱看的范围（1 = 整栋楼）
     dwellSec: 0.7, // 每扇窗看多久
     coolPerSec: 0.1, // 你缩着头时，他对你位置的把握每秒忘掉多少
-    glintCells: 1.3, // 红圈离你几扇窗以内，他的镜片会反光（认人的线索）
+    glintCells: 1.0, // 红圈离你几扇窗以内，他的镜片会反光（认人的线索）
   },
 
   heart: {
@@ -53,15 +54,15 @@ const config = {
   // still：别人都动只有他不动；tap：缩着时敲窗台；decoy：摆几个头盔假人；mover：被你盯住就换窗
   opponents: {
     patient: { name: '耐心型', tell: '别人都在动，只有他一动不动', hideMin: 2.0, hideMax: 2.4, peekSec: 3.0,
-      seekSpeed: 2.5, heatRate: 0.1, lockSec: 0.8, quickDraw: 0.9, poseShift: 3, still: true },
+      seekSpeed: 2.5, heatRate: 0.1, lockSec: 0.8, quickDraw: 0.9, poseShift: 2, still: true },
     nervous: { name: '焦躁型', tell: '缩着的时候会敲窗台', hideMin: 1.0, hideMax: 1.8, peekSec: 1.6,
-      seekSpeed: 3.4, heatRate: 0.14, lockSec: 0.65, quickDraw: 0.75, poseShift: 3, tap: true },
+      seekSpeed: 3.4, heatRate: 0.14, lockSec: 0.65, quickDraw: 0.75, poseShift: 2, tap: true },
     sly: { name: '狡猾型', tell: '摆了头盔假人：缩头再起来时，假人不会挪', hideMin: 1.4, hideMax: 2.4, peekSec: 1.8,
-      seekSpeed: 3, heatRate: 0.15, lockSec: 0.6, quickDraw: 0.7, poseShift: 2.5, decoy: 1 },
+      seekSpeed: 3, heatRate: 0.15, lockSec: 0.6, quickDraw: 0.7, poseShift: 2, decoy: 1 },
     mover: { name: '换位型', tell: '被你盯住就换窗，路过的窗帘会一扇扇动', hideMin: 1.4, hideMax: 2.2, peekSec: 2.0,
-      seekSpeed: 3, heatRate: 0.15, lockSec: 0.65, quickDraw: 0.75, poseShift: 3, mover: true },
+      seekSpeed: 3, heatRate: 0.15, lockSec: 0.65, quickDraw: 0.75, poseShift: 2, mover: true },
     boss: { name: '老枪', tell: '三条命，每挨一枪换一招', hideMin: 1.4, hideMax: 2.2, peekSec: 2.2,
-      seekSpeed: 3.2, heatRate: 0.16, lockSec: 0.6, quickDraw: 0.7, poseShift: 3,
+      seekSpeed: 3.2, heatRate: 0.16, lockSec: 0.6, quickDraw: 0.7, poseShift: 2,
       phases: [{ still: true }, { mover: true, seekSpeed: 3.6 }, { decoy: 2, tap: true, seekSpeed: 4, fog: true }] },
   },
 

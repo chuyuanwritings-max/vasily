@@ -20,77 +20,120 @@ const CHAPTERS = [
     levels: [
       {
         id: 'c1', name: '第一枪',
-        teach: [['对面有两个人影，只有一个是狙击手', '他探头找你的时候，镜片会反光'], ['左下点一下 = 缩一下头再起来', '画面会变一处：找出他']],
+        teach: [['只有一个是狙击手', '缩一下头，看谁挪了']],
         stars: ['noMiss', 'noLock'],
-        rounds: [{ opp: 'patient', theme: 'oldtown', figures: 2, goal: 'kill', bullets: 3, time: 90, hitR: 10 }],
+        rounds: [{ opp: 'patient', theme: 'oldtown', figures: 4, goal: 'kill', bullets: 3, time: 90, hitR: 7, props: 6 }],
       },
       {
         id: 'c2', name: '谁在闪',
-        teach: [['人多了：四个人影', '下面红圈靠近你时，对面谁在闪，谁就是他'], ['路人会动来动去', '耐心型一动不动']],
+        teach: [['红圈压到你身边时，他的镜片会闪', '路人的手机也会闪']],
         stars: ['noMiss', 'fast'], fastSec: 50,
-        rounds: [{ opp: 'patient', theme: 'market', figures: 4, goal: 'kill', bullets: 3, time: 80, hitR: 10 }],
+        rounds: [{ opp: 'patient', theme: 'market', figures: 6, goal: 'kill', bullets: 3, time: 80, hitR: 7, props: 10 }],
       },
       {
         id: 'c3', name: '换个窗',
-        teach: [['同一扇窗露头三次，他就记住了', '点下面那栋楼的另一扇窗 = 爬过去'], ['焦躁型：缩着的时候会敲窗台', '']],
+        teach: [['点下面的另一扇窗 = 换窗', '同一扇窗露头三次，他就记住了']],
         stars: ['noLock', 'noRescue'],
         rounds: [
-          { opp: 'nervous', theme: 'tanks', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 9.5 },
-          { opp: 'nervous', theme: 'tanks', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 9.5 },
+          { opp: 'nervous', theme: 'tanks', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6.5, props: 10 },
+          { opp: 'nervous', theme: 'tanks', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6.5, props: 10 },
         ],
       },
       {
         id: 'c4', name: '起雾了',
-        teach: [['大雾一阵一阵地散', '浓雾时他也看不清你：趁雾大多看几眼'], ['', '']],
+        teach: [['浓雾时他也看不清你', '']],
         stars: ['noMiss', 'noLock'],
         rounds: [
-          { opp: 'patient', theme: 'port', figures: 4, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 9 },
-          { opp: 'nervous', theme: 'port', figures: 5, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 9 },
+          { opp: 'patient', theme: 'port', figures: 6, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 6.5, props: 12 },
+          { opp: 'nervous', theme: 'port', figures: 7, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 6.5, props: 12 },
         ],
       },
       {
         id: 'c5', name: '假人',
-        teach: [['狡猾型挑了个头盔当假人', '缩头再起来时，假人不会挪；打中它算打错'], ['打错人扣 8 秒', '']],
+        teach: [['头盔假人：缩头再起来时它不挪', '打错扣 8 秒']],
         stars: ['noMiss', 'fast'], fastSec: 110,
         rounds: [
-          { opp: 'sly', theme: 'station', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 8.5 },
-          { opp: 'sly', theme: 'station', figures: 5, goal: 'kill', bullets: 3, time: 75, hitR: 8.5 },
+          { opp: 'sly', theme: 'station', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6, props: 12 },
+          { opp: 'sly', theme: 'station', figures: 7, goal: 'kill', bullets: 3, time: 75, hitR: 6, props: 12 },
         ],
       },
       {
         id: 'c6', name: '掩护小雨',
-        teach: [['小雨要从街上跑过去', '他瞄着小雨时就不在找你：趁这时候打他'], ['小雨被锁定满了就输', '']],
+        teach: [['掩护街上的小雨', '他瞄小雨时没在看你']],
         stars: ['noLock', 'noRescue'],
-        rounds: [{ opp: 'nervous', theme: 'factory', figures: 4, goal: 'escort', bullets: 3, time: 90, hitR: 8.5 }],
+        rounds: [{ opp: 'nervous', theme: 'factory', figures: 6, goal: 'escort', bullets: 3, time: 90, hitR: 6, props: 10 }],
       },
       {
         id: 'c7', name: '鸽子',
-        teach: [['屋顶的鸽子一受惊就飞', '他探头时鸽子飞了：他就在那附近'], ['换位型：被你盯住就换窗', '路过的窗帘会一扇扇动']],
+        teach: [['鸽子飞起来的那栋楼：他就在里面', '']],
         stars: ['noMiss', 'noLock'],
         rounds: [
-          { opp: 'mover', theme: 'desert', figures: 4, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 8 },
-          { opp: 'mover', theme: 'desert', figures: 5, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 8 },
+          { opp: 'mover', theme: 'desert', figures: 7, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 5.5, props: 14 },
+          { opp: 'mover', theme: 'desert', figures: 8, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 5.5, props: 14 },
         ],
       },
       {
         id: 'c8', name: '一枪定胜负',
-        teach: [['夜里只有亮灯的窗看得清', '他不会站在亮灯的窗里：看反光'], ['这一关每回合只有一发子弹', '']],
+        teach: [['夜里看反光', '每回合只有一发']],
         stars: ['noLock', 'fast'], fastSec: 100,
         rounds: [
-          { opp: 'patient', theme: 'neon', figures: 4, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 8 },
-          { opp: 'sly', theme: 'neon', figures: 5, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 8 },
+          { opp: 'patient', theme: 'neon', figures: 6, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 5.5, props: 12 },
+          { opp: 'sly', theme: 'neon', figures: 7, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 5.5, props: 12 },
         ],
       },
       {
         id: 'c9', name: 'Boss · 老枪', boss: true, needStars: 10,
         bossIntro: ['网吧里没人赢过他', '三条命：每挨一枪，他换一招'],
-        teach: [['第一段：一动不动', '第二段：被你盯住就换窗'], ['第三段：摆两个假人，还起雾', '每一段子弹重新给三发']],
+        teach: [['三条命，每挨一枪换一招', '']],
         stars: ['noRescue', 'noLock'],
-        rounds: [{ opp: 'boss', theme: 'eaves', figures: 5, goal: 'kill', bullets: 3, time: 120, hitR: 8 }],
+        rounds: [{ opp: 'boss', theme: 'eaves', figures: 8, goal: 'kill', bullets: 3, time: 120, hitR: 5, props: 14 }],
       },
     ],
   },
 ];
+
+// —— 擂台：一个接一个打，每赢一个叠一个加难 ——
+const ARENA_MODS = [
+  { id: 'crowd', name: '人更多', f: (R) => { R.figures += 2; R.props += 4; } },
+  { id: 'ammo', name: '少一发子弹', f: (R) => { R.bullets = Math.max(1, R.bullets - 1); } },
+  { id: 'small', name: '判定圈小一圈', f: (R) => { R.hitR = Math.max(4, R.hitR - 1); } },
+  { id: 'time', name: '少 15 秒', f: (R) => { R.time = Math.max(35, R.time - 15); } },
+  { id: 'fast', name: '他找得更快', f: (R) => { R.seekMul = (R.seekMul || 1) * 1.25; } },
+  { id: 'fog', name: '大雾', cond: true, f: (R) => { R.cond = 'fog'; } },
+  { id: 'night', name: '夜里', cond: true, f: (R) => { R.cond = 'night'; } },
+  { id: 'pigeons', name: '鸽群', cond: true, f: (R) => { R.cond = 'pigeons'; } },
+  { id: 'crowd2', name: '人再多一点', f: (R) => { R.figures += 1; R.props += 4; } },
+  { id: 'fast2', name: '他找得再快一点', f: (R) => { R.seekMul = (R.seekMul || 1) * 1.2; } },
+];
+const RANDOM_OPPS = ['patient', 'nervous', 'sly', 'mover'];
+const RANDOM_THEMES = ['oldtown', 'market', 'tanks', 'port', 'station', 'factory', 'neon', 'desert', 'eaves'];
+
+// 擂台的下一个回合：随机对手和背景，再叠上已经攒下的加难
+function arenaRound(modIds, rand) {
+  const R = { opp: RANDOM_OPPS[Math.floor(rand() * RANDOM_OPPS.length)], theme: RANDOM_THEMES[Math.floor(rand() * RANDOM_THEMES.length)], figures: 5, props: 10, goal: 'kill', bullets: 3, time: 70, hitR: 6.5 };
+  modIds.forEach((id) => ARENA_MODS.find((m) => m.id === id).f(R));
+  return R;
+}
+
+// 赢了一个：从还没用过的加难里抽一个（天气只叠一种）
+function pickArenaMod(modIds, rand) {
+  const hasCond = modIds.some((id) => ARENA_MODS.find((m) => m.id === id).cond);
+  const pool = ARENA_MODS.filter((m) => modIds.indexOf(m.id) < 0 && !(hasCond && m.cond));
+  if (!pool.length) return null;
+  return pool[Math.floor(rand() * pool.length)];
+}
+
+// —— 每日挑战：同一天所有人同一局（三个回合），比用时 ——
+function dailyRounds(day, rngFn) {
+  const r = rngFn(day);
+  const conds = [null, 'fog', 'night', 'pigeons'];
+  return [0, 1, 2].map((i) => ({
+    opp: RANDOM_OPPS[Math.floor(r() * RANDOM_OPPS.length)],
+    theme: RANDOM_THEMES[Math.floor(r() * RANDOM_THEMES.length)],
+    cond: i === 0 ? null : conds[Math.floor(r() * conds.length)],
+    figures: 6 + i, props: 12, goal: 'kill', bullets: 3, time: 75, hitR: 6,
+  }));
+}
 
 function allLevels() {
   const out = [];
@@ -105,4 +148,4 @@ function starText(lv, key) {
   return typeof t === 'function' ? t(lv) : t;
 }
 
-module.exports = { CHAPTERS, LEVELS, starText };
+module.exports = { CHAPTERS, LEVELS, starText, ARENA_MODS, arenaRound, pickArenaMod, dailyRounds };

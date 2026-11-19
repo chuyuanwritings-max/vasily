@@ -32,7 +32,8 @@ function build(seed, duelCfg, D, themeId, extra) {
     const pad = (w - cols * 30) / 2 + 7;
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        b.windows.push({ x: x + pad + col * 30, y: top + 24 + row * 42, w: 16, h: 22, bricked: r() < 0.12 });
+        // 楼上的杂物：空调外机、阳台栏杆（只是看着乱，不会变）
+        b.windows.push({ x: x + pad + col * 30, y: top + 24 + row * 42, w: 16, h: 22, bricked: r() < 0.12, ac: r() < 0.16, balcony: r() < 0.12 });
       }
     }
     buildings.push(b);
@@ -56,7 +57,7 @@ function build(seed, duelCfg, D, themeId, extra) {
   const figures = [{ kind: 'sniper', win: spot, lift: 0, pose: r() < 0.5 ? 0 : 1, shift: duelCfg.poseShift || 3, color, sway: 0, swayOn: true, phase: r() * 6 }];
   const nFig = Math.max(1, extra.figures || 1);
   const nDecoy = extra.decoys || 0;
-  const taken = (w) => figures.some((f) => Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 70);
+  const taken = (w) => figures.some((f) => Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 50);
   const pool = spots.slice();
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(r() * (i + 1));
@@ -71,13 +72,27 @@ function build(seed, duelCfg, D, themeId, extra) {
     figures.push({
       kind: isDecoy ? 'decoy' : 'civ', win: w, lift: isDecoy ? 0 : 1, pose: r() < 0.5 ? 0 : 1, shift: 3, color,
       sway: 0, swayOn: !isDecoy, phase: r() * 6, stick: !isDecoy && r() < 0.35, timer: 1 + r() * 3, lit: false,
+      phone: !isDecoy && r() < 0.35, flashAt: 2 + r() * 5, flashOn: false, // 有的路人拿手机，屏幕也会闪一下（假反光）
     });
   }
   const decoy = figures.find((f) => f.kind === 'decoy') || null;
+  // 像人头的东西：花盆、猫、台灯、人体模特、挂着的大衣、鸟笼。跟人影一样的黑剪影
+  const PROP_TYPES = ['plant', 'cat', 'lamp', 'mannequin', 'coat', 'cage'];
+  const props = [];
+  const propFree = allWindows.filter((w) => !w.bricked && !figures.some((f) => f.win === w));
+  for (let i = propFree.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    const t = propFree[i];
+    propFree[i] = propFree[j];
+    propFree[j] = t;
+  }
+  propFree.slice(0, extra.props || 0).forEach((w) => {
+    props.push({ type: PROP_TYPES[Math.floor(r() * PROP_TYPES.length)], win: w, state: r() < 0.5 ? 0 : 1, x: w.x + 8, y: w.y + 11, color });
+  });
 
   // 干扰：会在你眨眼时变的东西
   const distractors = [];
-  const free = allWindows.filter((w) => !w.bricked && !figures.some((f) => f.win === w));
+  const free = allWindows.filter((w) => !w.bricked && !figures.some((f) => f.win === w) && !props.some((p) => p.win === w));
   for (let i = free.length - 1; i > 0; i--) {
     const j = Math.floor(r() * (i + 1));
     const tmp = free[i];
@@ -146,6 +161,7 @@ function build(seed, duelCfg, D, themeId, extra) {
     flakes,
     allWindows,
     figures,
+    props,
     decoy,
     enemy: figures[0], // 狙击手（lift：0 = 缩在窗台下，1 = 探出头）
     night: !!extra.night,
@@ -195,6 +211,86 @@ function relocateSniper(sc, rand, D, now) {
   e.win = to;
   e.pose = rand() < 0.5 ? 0 : 1;
   void half;
+}
+
+// 道具的「头」在哪（打中它算打错人）
+function propHead(p) {
+  const w = p.win;
+  const dx = p.type === 'cat' ? (p.state ? 4 : -4) : 0;
+  const dy = { plant: 9, cat: 13, lamp: 7, mannequin: 8, coat: 6, cage: 7 }[p.type] || 8;
+  return { x: w.x + w.w / 2 + dx, y: w.y + dy };
+}
+
+function drawProp(ctx, p, ox, oy, night) {
+  const w = p.win;
+  const h = propHead(p);
+  const x = ox + h.x;
+  const y = oy + h.y;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(ox + w.x, oy + w.y, w.w, w.h);
+  ctx.clip();
+  if (p.type === 'lamp' && p.state) {
+    ctx.fillStyle = 'rgba(255,220,130,0.55)';
+    ctx.fillRect(ox + w.x, oy + w.y, w.w, w.h);
+  }
+  ctx.globalAlpha = night ? 0.35 : 1;
+  ctx.fillStyle = p.color;
+  ctx.beginPath();
+  if (p.type === 'plant') {
+    // 花盆：一团叶子 + 盆
+    ctx.arc(x - 2, y, 3.5, 0, Math.PI * 2);
+    ctx.arc(x + 2.5, y - 1, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(x - 4, y + 3, 8, 8);
+  } else if (p.type === 'cat') {
+    // 猫：圆头 + 两只尖耳朵 + 身子
+    ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+    ctx.moveTo(x - 3, y - 1);
+    ctx.lineTo(x - 2.5, y - 5.5);
+    ctx.lineTo(x - 0.5, y - 2.5);
+    ctx.moveTo(x + 3, y - 1);
+    ctx.lineTo(x + 2.5, y - 5.5);
+    ctx.lineTo(x + 0.5, y - 2.5);
+    ctx.fill();
+    ctx.fillRect(x - 4, y + 2, 9, 6);
+  } else if (p.type === 'lamp') {
+    // 台灯：梯形灯罩 + 杆
+    ctx.moveTo(x - 3, y - 4);
+    ctx.lineTo(x + 3, y - 4);
+    ctx.lineTo(x + 5, y + 2);
+    ctx.lineTo(x - 5, y + 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(x - 0.8, y + 2, 1.6, 10);
+  } else if (p.type === 'mannequin') {
+    // 人体模特：跟人一模一样的剪影，但从来不动
+    ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(x - 7, y + 5, 14, 12);
+  } else if (p.type === 'coat') {
+    // 挂着的大衣和帽子：帽檐 + 肩
+    ctx.arc(x, y, 3.8, Math.PI, 0);
+    ctx.fill();
+    ctx.fillRect(x - 6, y, 12, 1.8);
+    ctx.moveTo(x - 6, y + 14);
+    ctx.lineTo(x - 4, y + 4);
+    ctx.lineTo(x + 4, y + 4);
+    ctx.lineTo(x + 6, y + 14);
+    ctx.fill();
+  } else if (p.type === 'cage') {
+    // 鸟笼：圆顶 + 竖条
+    ctx.arc(x, y + 1, 5, Math.PI, 0);
+    ctx.fill();
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 1;
+    for (let i = -4; i <= 4; i += 2) {
+      ctx.moveTo(x + i, y + 1);
+      ctx.lineTo(x + i, y + 10);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function toggle(d) {
@@ -325,6 +421,28 @@ function drawWindow(ctx, w, b, th, ox, oy) {
   } else {
     ctx.fillRect(x, y, w.w, w.h);
     ctx.strokeRect(x, y, w.w, w.h);
+  }
+  if (w.ac) {
+    ctx.fillStyle = '#c9c4d0';
+    ctx.fillRect(x + w.w - 2, y + w.h - 6, 9, 7);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = INK;
+    ctx.strokeRect(x + w.w - 2, y + w.h - 6, 9, 7);
+    ctx.beginPath();
+    ctx.arc(x + w.w + 2.5, y + w.h - 2.5, 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (w.balcony) {
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y + w.h - 7);
+    ctx.lineTo(x + w.w + 3, y + w.h - 7);
+    for (let i = 0; i <= 5; i++) {
+      ctx.moveTo(x - 3 + i * ((w.w + 6) / 5), y + w.h - 7);
+      ctx.lineTo(x - 3 + i * ((w.w + 6) / 5), y + w.h + 1);
+    }
+    ctx.stroke();
   }
   if (th.extras && th.extras.awning && !w.bricked) {
     const c = th.extras.awning;
@@ -601,6 +719,8 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
     sc.figures.forEach((f) => f.lit && glow(f.win));
   }
 
+  sc.props.forEach((p) => drawProp(ctx, p, ox, oy, sc.night));
+
   // 人影：狙击手、路人、头盔假人，都是一样颜色的剪影
   const drop = opt.enemyDrop || 0;
   sc.figures.forEach((f) => {
@@ -642,6 +762,16 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
     }
   });
 
+  // 路人的手机屏幕一闪（假反光）
+  sc.figures.forEach((f) => {
+    if (!f.flashOn || f.lift < 0.5) return;
+    const h = figureHead(f);
+    ctx.fillStyle = '#e8f4ff';
+    ctx.beginPath();
+    ctx.arc(ox + h.x + 3, oy + h.y + 3, sc.night ? 3 : 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
   // 焦躁型缩着时敲窗台：窗台上两个小指节一上一下
   if (opt.tap) {
     const w = sc.enemy.win;
@@ -672,7 +802,7 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
     const head = enemyHead(sc);
     const gx = ox + head.x - 2;
     const gy = oy + head.y + 1;
-    const r = sc.night ? 10 : 7;
+    const r = sc.night ? 7 : 4.5;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.moveTo(gx, gy - r);
@@ -786,4 +916,4 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
   drawWeather(ctx, sc, cam, cx, cy, D, t);
 }
 
-module.exports = { build, draw, enemyHead, decoyHead, figureHead, relocateSniper, toggle, WORLD_W, WORLD_H, GROUND };
+module.exports = { build, draw, enemyHead, decoyHead, figureHead, propHead, relocateSniper, toggle, WORLD_W, WORLD_H, GROUND };

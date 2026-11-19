@@ -241,7 +241,7 @@ __def("js/config.js", function (module, exports, require) {
 // 单位：时间是秒（blinkMs 是毫秒），距离是屏幕上的点（375 宽的手机上量）。
 
 const config = {
-  version: '瓦西里 · 原型 0.5',
+  version: '瓦西里 · 原型 0.6',
 
   // 激励视频广告位 id。空着 = 放「广告占位」倒计时；上线前填后台建的 id。
   rewardedAdUnitId: '',
@@ -264,14 +264,15 @@ const config = {
   },
 
   // 屏息时，准星离他的头够近，会被轻轻吸过去。按关卡序号（从 0 起）查表，查不到就是 0
-  assist: { radius: [10, 10, 8, 6, 5, 4, 3, 0, 0], perSec: 3 },
+  // 0.6：Cc 说瞄准太简单，全部关掉
+  assist: { radius: [], perSec: 3 },
 
   // 他的镜子怎么在你这栋楼上找你（画面下方的红圈）
   seek: {
     spread: 0.6, // 他刚开始乱看的范围（1 = 整栋楼）
     dwellSec: 0.7, // 每扇窗看多久
     coolPerSec: 0.1, // 你缩着头时，他对你位置的把握每秒忘掉多少
-    glintCells: 1.3, // 红圈离你几扇窗以内，他的镜片会反光（认人的线索）
+    glintCells: 1.0, // 红圈离你几扇窗以内，他的镜片会反光（认人的线索）
   },
 
   heart: {
@@ -292,15 +293,15 @@ const config = {
   // still：别人都动只有他不动；tap：缩着时敲窗台；decoy：摆几个头盔假人；mover：被你盯住就换窗
   opponents: {
     patient: { name: '耐心型', tell: '别人都在动，只有他一动不动', hideMin: 2.0, hideMax: 2.4, peekSec: 3.0,
-      seekSpeed: 2.5, heatRate: 0.1, lockSec: 0.8, quickDraw: 0.9, poseShift: 3, still: true },
+      seekSpeed: 2.5, heatRate: 0.1, lockSec: 0.8, quickDraw: 0.9, poseShift: 2, still: true },
     nervous: { name: '焦躁型', tell: '缩着的时候会敲窗台', hideMin: 1.0, hideMax: 1.8, peekSec: 1.6,
-      seekSpeed: 3.4, heatRate: 0.14, lockSec: 0.65, quickDraw: 0.75, poseShift: 3, tap: true },
+      seekSpeed: 3.4, heatRate: 0.14, lockSec: 0.65, quickDraw: 0.75, poseShift: 2, tap: true },
     sly: { name: '狡猾型', tell: '摆了头盔假人：缩头再起来时，假人不会挪', hideMin: 1.4, hideMax: 2.4, peekSec: 1.8,
-      seekSpeed: 3, heatRate: 0.15, lockSec: 0.6, quickDraw: 0.7, poseShift: 2.5, decoy: 1 },
+      seekSpeed: 3, heatRate: 0.15, lockSec: 0.6, quickDraw: 0.7, poseShift: 2, decoy: 1 },
     mover: { name: '换位型', tell: '被你盯住就换窗，路过的窗帘会一扇扇动', hideMin: 1.4, hideMax: 2.2, peekSec: 2.0,
-      seekSpeed: 3, heatRate: 0.15, lockSec: 0.65, quickDraw: 0.75, poseShift: 3, mover: true },
+      seekSpeed: 3, heatRate: 0.15, lockSec: 0.65, quickDraw: 0.75, poseShift: 2, mover: true },
     boss: { name: '老枪', tell: '三条命，每挨一枪换一招', hideMin: 1.4, hideMax: 2.2, peekSec: 2.2,
-      seekSpeed: 3.2, heatRate: 0.16, lockSec: 0.6, quickDraw: 0.7, poseShift: 3,
+      seekSpeed: 3.2, heatRate: 0.16, lockSec: 0.6, quickDraw: 0.7, poseShift: 2,
       phases: [{ still: true }, { mover: true, seekSpeed: 3.6 }, { decoy: 2, tap: true, seekSpeed: 4, fog: true }] },
   },
 
@@ -1088,6 +1089,7 @@ function createDuel(opts) {
     night: cond === 'night',
     pigeons: cond === 'pigeons',
     escort: R.goal === 'escort',
+    props: R.props === undefined ? 10 : R.props,
   });
   const half = opts.scopeD / 2;
   const rand = rng(opts.seed ^ 0x5bd1e995);
@@ -1150,7 +1152,13 @@ function createDuel(opts) {
   };
 
   function tactic() {
-    return Object.assign({}, opp, phases[d.phase] || {});
+    const t = Object.assign({}, opp, phases[d.phase] || {});
+    // 擂台加难：他找得更快
+    if (R.seekMul) {
+      t.seekSpeed *= R.seekMul;
+      t.heatRate *= R.seekMul;
+    }
+    return t;
   }
   d.tactic = tactic;
   sc.enemy.swayOn = !tactic().still;
@@ -1215,12 +1223,14 @@ function createDuel(opts) {
     });
     const inView = [];
     const outView = [];
-    sc.distractors.forEach((x) => {
+    const pool = sc.distractors.concat(sc.props.filter((p) => p.type === 'cat' || p.type === 'lamp'));
+    pool.forEach((x) => {
       const near = Math.abs(x.x - d.cam.x) < half && Math.abs(x.y - d.cam.y) < half;
       (near ? inView : outView).push(x);
     });
     const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
-    shuffle(inView).concat(shuffle(outView)).slice(0, 2 + d.levelIndex % 3).forEach(scene.toggle);
+    const n = R.changes || 4 + Math.min(4, Math.floor(d.levelIndex / 2));
+    shuffle(inView).concat(shuffle(outView)).slice(0, n).forEach(scene.toggle);
   }
 
   // —— 开枪 ——
@@ -1263,6 +1273,7 @@ function createDuel(opts) {
     if (!kind) {
       const other = sc.figures.find((f) => f !== sc.enemy && f.lift > 0.4 && Math.hypot(aim.x - scene.figureHead(f).x, aim.y - scene.figureHead(f).y) <= OTHER_R);
       if (other) kind = other.kind === 'decoy' ? 'decoy' : 'wrong';
+      else if (sc.props.some((p) => Math.hypot(aim.x - scene.propHead(p).x, aim.y - scene.propHead(p).y) <= OTHER_R)) kind = 'wrong';
     }
     if (!kind) {
       if (!d.enemyExposed() && dist <= d.hitRadius + 6) kind = 'covered';
@@ -1476,6 +1487,13 @@ function createDuel(opts) {
       f.phase += dt;
       f.sway = f.swayOn ? Math.sin(f.phase * 1.7) * 1.6 : 0;
       if (f.kind === 'civ') {
+        if (f.phone) {
+          f.flashAt -= dt;
+          if (f.flashAt <= 0) {
+            f.flashOn = !f.flashOn;
+            f.flashAt = f.flashOn ? 0.25 : 2.5 + rand() * 4;
+          }
+        }
         f.timer -= dt;
         if (f.timer <= 0) {
           if (f.lift > 0.5 && rand() < 0.45) {
@@ -1681,7 +1699,7 @@ function createDuel(opts) {
     if (d.state !== 'play' && d.state !== 'hit') return false;
     if (d.drawLeft >= 0 || d.flashSec > 0) return true;
     if (!d.searching() || d.aimingMate() || !d.enemyExposed()) return false;
-    return d.seekDist() < S.glintCells && (d.t * 1.2) % 1 < 0.3;
+    return d.seekDist() <= S.glintCells && (d.t * 1.2) % 1 < 0.18;
   };
   // 枪管：他探头找你时露出来
   d.barrel = function () {
@@ -1725,77 +1743,120 @@ const CHAPTERS = [
     levels: [
       {
         id: 'c1', name: '第一枪',
-        teach: [['对面有两个人影，只有一个是狙击手', '他探头找你的时候，镜片会反光'], ['左下点一下 = 缩一下头再起来', '画面会变一处：找出他']],
+        teach: [['只有一个是狙击手', '缩一下头，看谁挪了']],
         stars: ['noMiss', 'noLock'],
-        rounds: [{ opp: 'patient', theme: 'oldtown', figures: 2, goal: 'kill', bullets: 3, time: 90, hitR: 10 }],
+        rounds: [{ opp: 'patient', theme: 'oldtown', figures: 4, goal: 'kill', bullets: 3, time: 90, hitR: 7, props: 6 }],
       },
       {
         id: 'c2', name: '谁在闪',
-        teach: [['人多了：四个人影', '下面红圈靠近你时，对面谁在闪，谁就是他'], ['路人会动来动去', '耐心型一动不动']],
+        teach: [['红圈压到你身边时，他的镜片会闪', '路人的手机也会闪']],
         stars: ['noMiss', 'fast'], fastSec: 50,
-        rounds: [{ opp: 'patient', theme: 'market', figures: 4, goal: 'kill', bullets: 3, time: 80, hitR: 10 }],
+        rounds: [{ opp: 'patient', theme: 'market', figures: 6, goal: 'kill', bullets: 3, time: 80, hitR: 7, props: 10 }],
       },
       {
         id: 'c3', name: '换个窗',
-        teach: [['同一扇窗露头三次，他就记住了', '点下面那栋楼的另一扇窗 = 爬过去'], ['焦躁型：缩着的时候会敲窗台', '']],
+        teach: [['点下面的另一扇窗 = 换窗', '同一扇窗露头三次，他就记住了']],
         stars: ['noLock', 'noRescue'],
         rounds: [
-          { opp: 'nervous', theme: 'tanks', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 9.5 },
-          { opp: 'nervous', theme: 'tanks', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 9.5 },
+          { opp: 'nervous', theme: 'tanks', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6.5, props: 10 },
+          { opp: 'nervous', theme: 'tanks', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6.5, props: 10 },
         ],
       },
       {
         id: 'c4', name: '起雾了',
-        teach: [['大雾一阵一阵地散', '浓雾时他也看不清你：趁雾大多看几眼'], ['', '']],
+        teach: [['浓雾时他也看不清你', '']],
         stars: ['noMiss', 'noLock'],
         rounds: [
-          { opp: 'patient', theme: 'port', figures: 4, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 9 },
-          { opp: 'nervous', theme: 'port', figures: 5, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 9 },
+          { opp: 'patient', theme: 'port', figures: 6, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 6.5, props: 12 },
+          { opp: 'nervous', theme: 'port', figures: 7, cond: 'fog', goal: 'kill', bullets: 3, time: 80, hitR: 6.5, props: 12 },
         ],
       },
       {
         id: 'c5', name: '假人',
-        teach: [['狡猾型挑了个头盔当假人', '缩头再起来时，假人不会挪；打中它算打错'], ['打错人扣 8 秒', '']],
+        teach: [['头盔假人：缩头再起来时它不挪', '打错扣 8 秒']],
         stars: ['noMiss', 'fast'], fastSec: 110,
         rounds: [
-          { opp: 'sly', theme: 'station', figures: 4, goal: 'kill', bullets: 3, time: 75, hitR: 8.5 },
-          { opp: 'sly', theme: 'station', figures: 5, goal: 'kill', bullets: 3, time: 75, hitR: 8.5 },
+          { opp: 'sly', theme: 'station', figures: 6, goal: 'kill', bullets: 3, time: 75, hitR: 6, props: 12 },
+          { opp: 'sly', theme: 'station', figures: 7, goal: 'kill', bullets: 3, time: 75, hitR: 6, props: 12 },
         ],
       },
       {
         id: 'c6', name: '掩护小雨',
-        teach: [['小雨要从街上跑过去', '他瞄着小雨时就不在找你：趁这时候打他'], ['小雨被锁定满了就输', '']],
+        teach: [['掩护街上的小雨', '他瞄小雨时没在看你']],
         stars: ['noLock', 'noRescue'],
-        rounds: [{ opp: 'nervous', theme: 'factory', figures: 4, goal: 'escort', bullets: 3, time: 90, hitR: 8.5 }],
+        rounds: [{ opp: 'nervous', theme: 'factory', figures: 6, goal: 'escort', bullets: 3, time: 90, hitR: 6, props: 10 }],
       },
       {
         id: 'c7', name: '鸽子',
-        teach: [['屋顶的鸽子一受惊就飞', '他探头时鸽子飞了：他就在那附近'], ['换位型：被你盯住就换窗', '路过的窗帘会一扇扇动']],
+        teach: [['鸽子飞起来的那栋楼：他就在里面', '']],
         stars: ['noMiss', 'noLock'],
         rounds: [
-          { opp: 'mover', theme: 'desert', figures: 4, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 8 },
-          { opp: 'mover', theme: 'desert', figures: 5, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 8 },
+          { opp: 'mover', theme: 'desert', figures: 7, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 5.5, props: 14 },
+          { opp: 'mover', theme: 'desert', figures: 8, cond: 'pigeons', goal: 'kill', bullets: 3, time: 80, hitR: 5.5, props: 14 },
         ],
       },
       {
         id: 'c8', name: '一枪定胜负',
-        teach: [['夜里只有亮灯的窗看得清', '他不会站在亮灯的窗里：看反光'], ['这一关每回合只有一发子弹', '']],
+        teach: [['夜里看反光', '每回合只有一发']],
         stars: ['noLock', 'fast'], fastSec: 100,
         rounds: [
-          { opp: 'patient', theme: 'neon', figures: 4, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 8 },
-          { opp: 'sly', theme: 'neon', figures: 5, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 8 },
+          { opp: 'patient', theme: 'neon', figures: 6, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 5.5, props: 12 },
+          { opp: 'sly', theme: 'neon', figures: 7, cond: 'night', goal: 'kill', bullets: 1, time: 80, hitR: 5.5, props: 12 },
         ],
       },
       {
         id: 'c9', name: 'Boss · 老枪', boss: true, needStars: 10,
         bossIntro: ['网吧里没人赢过他', '三条命：每挨一枪，他换一招'],
-        teach: [['第一段：一动不动', '第二段：被你盯住就换窗'], ['第三段：摆两个假人，还起雾', '每一段子弹重新给三发']],
+        teach: [['三条命，每挨一枪换一招', '']],
         stars: ['noRescue', 'noLock'],
-        rounds: [{ opp: 'boss', theme: 'eaves', figures: 5, goal: 'kill', bullets: 3, time: 120, hitR: 8 }],
+        rounds: [{ opp: 'boss', theme: 'eaves', figures: 8, goal: 'kill', bullets: 3, time: 120, hitR: 5, props: 14 }],
       },
     ],
   },
 ];
+
+// —— 擂台：一个接一个打，每赢一个叠一个加难 ——
+const ARENA_MODS = [
+  { id: 'crowd', name: '人更多', f: (R) => { R.figures += 2; R.props += 4; } },
+  { id: 'ammo', name: '少一发子弹', f: (R) => { R.bullets = Math.max(1, R.bullets - 1); } },
+  { id: 'small', name: '判定圈小一圈', f: (R) => { R.hitR = Math.max(4, R.hitR - 1); } },
+  { id: 'time', name: '少 15 秒', f: (R) => { R.time = Math.max(35, R.time - 15); } },
+  { id: 'fast', name: '他找得更快', f: (R) => { R.seekMul = (R.seekMul || 1) * 1.25; } },
+  { id: 'fog', name: '大雾', cond: true, f: (R) => { R.cond = 'fog'; } },
+  { id: 'night', name: '夜里', cond: true, f: (R) => { R.cond = 'night'; } },
+  { id: 'pigeons', name: '鸽群', cond: true, f: (R) => { R.cond = 'pigeons'; } },
+  { id: 'crowd2', name: '人再多一点', f: (R) => { R.figures += 1; R.props += 4; } },
+  { id: 'fast2', name: '他找得再快一点', f: (R) => { R.seekMul = (R.seekMul || 1) * 1.2; } },
+];
+const RANDOM_OPPS = ['patient', 'nervous', 'sly', 'mover'];
+const RANDOM_THEMES = ['oldtown', 'market', 'tanks', 'port', 'station', 'factory', 'neon', 'desert', 'eaves'];
+
+// 擂台的下一个回合：随机对手和背景，再叠上已经攒下的加难
+function arenaRound(modIds, rand) {
+  const R = { opp: RANDOM_OPPS[Math.floor(rand() * RANDOM_OPPS.length)], theme: RANDOM_THEMES[Math.floor(rand() * RANDOM_THEMES.length)], figures: 5, props: 10, goal: 'kill', bullets: 3, time: 70, hitR: 6.5 };
+  modIds.forEach((id) => ARENA_MODS.find((m) => m.id === id).f(R));
+  return R;
+}
+
+// 赢了一个：从还没用过的加难里抽一个（天气只叠一种）
+function pickArenaMod(modIds, rand) {
+  const hasCond = modIds.some((id) => ARENA_MODS.find((m) => m.id === id).cond);
+  const pool = ARENA_MODS.filter((m) => modIds.indexOf(m.id) < 0 && !(hasCond && m.cond));
+  if (!pool.length) return null;
+  return pool[Math.floor(rand() * pool.length)];
+}
+
+// —— 每日挑战：同一天所有人同一局（三个回合），比用时 ——
+function dailyRounds(day, rngFn) {
+  const r = rngFn(day);
+  const conds = [null, 'fog', 'night', 'pigeons'];
+  return [0, 1, 2].map((i) => ({
+    opp: RANDOM_OPPS[Math.floor(r() * RANDOM_OPPS.length)],
+    theme: RANDOM_THEMES[Math.floor(r() * RANDOM_THEMES.length)],
+    cond: i === 0 ? null : conds[Math.floor(r() * conds.length)],
+    figures: 6 + i, props: 12, goal: 'kill', bullets: 3, time: 75, hitR: 6,
+  }));
+}
 
 function allLevels() {
   const out = [];
@@ -1810,7 +1871,7 @@ function starText(lv, key) {
   return typeof t === 'function' ? t(lv) : t;
 }
 
-module.exports = { CHAPTERS, LEVELS, starText };
+module.exports = { CHAPTERS, LEVELS, starText, ARENA_MODS, arenaRound, pickArenaMod, dailyRounds };
 
 });
 __def("js/main.js", function (module, exports, require) {
@@ -1875,6 +1936,9 @@ const G = {
   say: null,
   say2: null,
   sfxT: {}, // 每种连续音效上一次响的时间
+  metrics: { roundSec: [], retrySec: [] }, // 量一局几秒、死到重开几秒
+  failAt: 0,
+  near: '',
   seedBase: Math.floor(Math.random() * 100000),
   title: null, // 开场背景
 };
@@ -1914,7 +1978,7 @@ function levelUnlocked(lv) {
 
 function startRound() {
   G.duel = createDuel({
-    seed: G.seedBase + G.roundIdx * 37 + G.attempt * 7919,
+    seed: G.seedBase + G.roundIdx * 37 + (G.daily ? 0 : G.attempt * 7919), // 每日挑战重来还是同一局
     config,
     scopeD: D,
     round: G.level.rounds[G.roundIdx],
@@ -1935,6 +1999,8 @@ function openLevel(lv) {
 }
 
 function startLevel() {
+  G.arena = null;
+  G.daily = null;
   G.card = G.pickCard;
   G.mods = team.mods(G.card ? [G.card] : []);
   G.rescuesLeft = config.rescuesPerLevel + G.mods.rescueAdd;
@@ -1947,11 +2013,95 @@ function startLevel() {
   startRound();
   const S = team.state();
   if (G.level.boss && S.cleared.indexOf(G.level.id) < 0) setMode('bossIntro');
-  else setMode('teach');
+  else if (!team.taught(G.level.id)) setMode('teach');
+  else setMode('intro');
+}
+
+// 输了点一下：直接回到这个回合开打（不放说明页、不放回合卡）
+function retryRound() {
+  if (G.duel) addStats(G.duel);
+  G.metrics.retrySec.push(+(G.t - G.failAt).toFixed(2));
+  G.attempt += 1;
+  startRound();
+  setMode('play');
 }
 
 function goMap() {
+  G.arena = null;
+  G.daily = null;
   setMode('map');
+}
+
+// —— 擂台：一个接一个打，每赢一个叠一个加难，记最高连胜 ——
+function startArena() {
+  G.arena = { streak: 0, mods: [], rand: rng(Math.floor(Math.random() * 1e9)), newMod: null };
+  G.daily = null;
+  G.card = null;
+  G.mods = team.mods([]);
+  G.rescuesLeft = config.rescuesPerLevel + G.mods.rescueAdd;
+  G.ammoAdsLeft = config.ammoAdsPerLevel;
+  G.stats = { wasted: 0, locked: false, rescued: 0, sec: 0 };
+  nextArenaRound();
+}
+
+function nextArenaRound() {
+  const A = G.arena;
+  G.level = { id: 'arena', name: '擂台', no: 0, index: 8, stars: [], rounds: [LV.arenaRound(A.mods, A.rand)] };
+  G.roundIdx = 0;
+  G.attempt = 0;
+  G.seedBase = Math.floor(A.rand() * 1e6);
+  startRound();
+  setMode('intro');
+}
+
+function arenaWin() {
+  const A = G.arena;
+  A.streak += 1;
+  team.earn('perRound');
+  const m = LV.pickArenaMod(A.mods, A.rand);
+  A.newMod = m;
+  if (m) A.mods.push(m.id);
+  A.best = team.recordArena(A.streak);
+  sfx('star');
+  setMode('arenaNext');
+}
+
+function endArena() {
+  if (G.arena) team.recordArena(G.arena.streak);
+  G.arena = null;
+  goTitle();
+}
+
+// —— 每日挑战：今天所有人同一局，三个回合，比用时 ——
+function dayKey() {
+  const n = new Date();
+  return n.getFullYear() * 10000 + (n.getMonth() + 1) * 100 + n.getDate();
+}
+
+function startDaily() {
+  const day = dayKey();
+  G.arena = null;
+  G.daily = { day, sec: 0 };
+  G.card = null;
+  G.mods = team.mods([]);
+  G.rescuesLeft = 0; // 每日挑战比真本事：不拉人
+  G.ammoAdsLeft = 0;
+  G.stats = { wasted: 0, locked: false, rescued: 0, sec: 0 };
+  G.level = { id: 'daily', name: '每日挑战', no: 0, index: 8, stars: [], rounds: LV.dailyRounds(day, rng) };
+  G.roundIdx = 0;
+  G.attempt = 0;
+  G.seedBase = day;
+  startRound();
+  setMode('intro');
+}
+
+function finishDaily() {
+  const sec = G.stats.sec;
+  G.daily.sec = sec;
+  G.daily.best = team.recordDaily(G.daily.day, sec);
+  team.earn('perRound', 3);
+  sfx('win');
+  setMode('dailyDone');
 }
 
 function startClassic() {
@@ -1971,7 +2121,7 @@ function inCircle(b, x, y) {
   return Math.hypot(x - b.x, y - b.y) <= b.r + 8;
 }
 
-const TAP_TO_SKIP = { bossIntro: 0.5, teach: 0.6, intro: 0.3, reveal: 1.0, move: 0.6, hit: 0.5, ammoGift: 0.4 };
+const TAP_TO_SKIP = { arenaNext: 0.5, bossIntro: 0.5, teach: 0.6, intro: 0.3, reveal: 1.0, move: 0.6, hit: 0.5, ammoGift: 0.4 };
 
 // 下面那栋楼的小图上点了哪扇窗
 function panelCell(x, y) {
@@ -2057,11 +2207,12 @@ function onTouch(type, id, sx, sy) {
 function skipAhead() {
   const m = G.mode;
   if (m === 'bossIntro') setMode('teach');
-  else if (m === 'teach') setMode('intro');
+  else if (m === 'teach') { team.markTaught(G.level.id); setMode('intro'); }
   else if (m === 'intro') setMode('play');
   else if (m === 'move') setMode('intro');
   else if (m === 'hit') afterHit();
   else if (m === 'ammoGift') giveAmmo();
+  else if (m === 'arenaNext') nextArenaRound();
   else if (m === 'reveal' && G.modeT < cut.REVEAL_SEC - 1.2) G.modeT = cut.REVEAL_SEC - 1.2;
 }
 
@@ -2075,13 +2226,19 @@ function addStats(d) {
 function afterHit() {
   const d = G.duel;
   addStats(d);
+  G.metrics.roundSec.push(Math.round(d.t));
   G.results.push(d.result());
   G.attempt = 0;
+  if (G.arena) {
+    arenaWin();
+    return;
+  }
   if (G.roundIdx + 1 < G.level.rounds.length) {
     G.roundIdx += 1;
     startRound(); // 下一个点位先建好，换位置动画用它的天色
     setMode('move');
-  } else finishLevel();
+  } else if (G.daily) finishDaily();
+  else finishLevel();
 }
 
 function finishLevel() {
@@ -2106,11 +2263,33 @@ function finishLevel() {
 }
 
 function fail(reason) {
-  if (G.duel) addStats(G.duel);
   G.failReason = reason;
+  G.failAt = G.t;
+  G.near = nearMiss(reason);
   sfx('lose');
   platform.vibrate(true);
   setMode('fail');
+}
+
+// 输在差一点：算出差多少，写在失败页上
+function nearMiss(reason) {
+  const d = G.duel;
+  if (!d) return '';
+  const head = scene.enemyHead(d.sc, 1);
+  if (reason === 'mateDown') {
+    const m = d.sc.mate;
+    return '小雨只差 ' + (m.covers.length - m.next) + ' 段就过街了';
+  }
+  if (reason === 'dry') {
+    const best = Math.min.apply(null, d.impacts.map((i) => i.dist));
+    const gap = Math.max(1, Math.round(best - d.hitRadius));
+    return '最近一枪离他的头' + (gap <= 15 ? '只差 ' : '还差 ') + gap + ' 点';
+  }
+  const aim = d.aimWorld();
+  const dist = Math.hypot(aim.x - head.x, aim.y - head.y);
+  const gap = Math.max(1, Math.round(dist - d.hitRadius));
+  if (dist < D / 2) return '你的准星离他的头' + (gap <= 15 ? '只差 ' : '还差 ') + gap + ' 点';
+  return '他就在你镜子外面一点点';
 }
 
 function giveAmmo() {
@@ -2153,8 +2332,10 @@ function ambientSound(d) {
   if (d.state !== 'play') return;
   if (d.searching() && !d.aimingMate() && d.exposed()) {
     const dist = d.seekDist();
+    // 耳机卡 / 观察手小雨：红圈离你还远就开始滴滴（只帮你保命，不告诉你他在哪）
+    const warn = d.mods.peekCue ? 3.5 : 2.2;
     if (d.lock > 0) sfxEvery('tick', 0.14, 0.5);
-    else if (dist < 2.2) sfxEvery('beep', 0.25 + dist * 0.25, 0.35);
+    else if (dist < warn) sfxEvery('beep', 0.25 + dist * 0.25, d.mods.peekCue ? 0.5 : 0.35);
   }
   if (d.heart > 1.25) sfxEvery('heart', 0.95 / d.heart, 0.5);
   const g = d.glint();
@@ -2190,10 +2371,9 @@ function update(dt) {
     else if (d.state === 'dead') {
       platform.vibrate(true);
       sfx('enemyShot');
-      if (G.rescuesLeft > 0) { G.adFor = 'rescue'; setMode('dead'); } else fail('dead');
-    } else if (d.state === 'dry') {
-      if (G.ammoAdsLeft > 0) { G.adFor = 'ammo'; setMode('dry'); } else fail('dry');
-    } else if (d.state === 'timeout') fail('timeout');
+      fail('dead');
+    } else if (d.state === 'dry') fail('dry');
+    else if (d.state === 'timeout') fail('timeout');
     else if (d.state === 'mateDown') fail('mateDown');
   } else if (m === 'hit') {
     d.update(dt);
@@ -2201,9 +2381,11 @@ function update(dt) {
   } else if (m === 'move' && G.modeT > cut.RELOCATE_SEC) setMode('intro');
   else if (m === 'ad' && G.modeT > config.fakeAdSec) adDone();
   else if (m === 'ammoGift' && G.modeT > 1.4) giveAmmo();
+  else if (m === 'arenaNext' && G.modeT > 1.8) nextArenaRound();
   else if (m === 'classic') G.classic.update(dt);
   else if (m === 'rescue' && G.modeT > cut.RESCUE_SEC) {
     addStats(G.duel);
+    G.metrics.retrySec.push(+(G.t - G.failAt - cut.RESCUE_SEC).toFixed(2));
     G.rescuesLeft -= 1;
     G.stats.rescued += 1;
     G.attempt += 1;
@@ -2231,7 +2413,7 @@ function callTeammate(forWhat) {
   const real = platform.showRewardedAd(
     config.rewardedAdUnitId,
     adDone,
-    () => fail(forWhat === 'ammo' ? 'dry' : 'dead')
+    () => setMode('fail')
   );
   if (!real) setMode('ad');
   else setMode('adWait');
@@ -2395,7 +2577,7 @@ function drawHud() {
 
   // 左上：第几关、第几回合、子弹
   const lv = G.level;
-  text('第 ' + lv.no + ' 关 · ' + lv.name, 14, 18, 12, '#f4f1de', 'left', 800);
+  text(G.arena ? '擂台 · 连胜 ' + G.arena.streak : G.daily ? '每日挑战' : '第 ' + lv.no + ' 关 · ' + lv.name, 14, 18, 12, '#f4f1de', 'left', 800);
   if (lv.rounds.length > 1) text('回合 ' + (G.roundIdx + 1) + ' / ' + lv.rounds.length, 14, 36, 11, '#c9c2e0', 'left', 700);
   const bulletsMax = d.round.bullets || 3;
   for (let i = 0; i < bulletsMax; i++) drawBullet(ctx, 18 + i * 14, lv.rounds.length > 1 ? 54 : 40, i < d.bullets);
@@ -2423,31 +2605,6 @@ function drawHud() {
   // 地图条件
   if (d.cond) text(config.conditions[d.cond].name, L.W - 46, 34, 11, '#c9c2e0', 'right', 800);
 
-  // 观察手（或耳机卡）：他探头时，在镜子边上指他的方向
-  if (d.mods.peekCue && d.searching() && d.drawLeft < 0) {
-    const h = scene.enemyHead(d.sc, 1);
-    const dx = h.x - d.cam.x;
-    const dy = h.y - d.cam.y;
-    if (Math.hypot(dx, dy) > D * 0.3) {
-      const a = Math.atan2(dy, dx);
-      const ax = scopeC.x + Math.cos(a) * (D / 2 - 18);
-      const ay = scopeC.y + Math.sin(a) * (D / 2 - 18);
-      ctx.save();
-      ctx.translate(ax, ay);
-      ctx.rotate(a);
-      ctx.fillStyle = '#3ef0ff';
-      ctx.beginPath();
-      ctx.moveTo(12, 0);
-      ctx.lineTo(-8, -10);
-      ctx.lineTo(-8, 10);
-      ctx.closePath();
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = INK;
-      ctx.stroke();
-      ctx.restore();
-    }
-  }
   if (d.drawLeft >= 0) {
     comicText(ctx, d.exposed() ? '他瞄准你了！' : '他盯着你的窗口', scopeC.x, scopeC.y - D / 2 + 30, d.exposed() ? 26 : 18, '#ff4d5e');
   }
@@ -2549,7 +2706,8 @@ function drawPanel(ctx, d) {
   const cy = (r) => p.y + 16 + ch * (r + 0.5);
   const aiming = d.drawLeft >= 0;
   roundRect(ctx, p.x, p.y, p.w, p.h, 8);
-  ctx.fillStyle = aiming && Math.sin(d.t * 18) > 0 ? '#5a1a2a' : '#2b2438';
+  const warn = d.mods.peekCue && d.searching() && !d.aimingMate() && d.seekDist() < 3.5;
+  ctx.fillStyle = aiming && Math.sin(d.t * 18) > 0 ? '#5a1a2a' : warn && Math.sin(d.t * 10) > 0 ? '#3a2030' : '#2b2438';
   ctx.fill();
   ctx.lineWidth = 2;
   ctx.strokeStyle = INK;
@@ -2884,8 +3042,15 @@ function drawFail() {
     ctx.stroke();
     text('他的镜子是这样找到你的', p.x + p.w / 2, p.y + p.h + 12, 11, '#c9c2e0', 'center', 700);
   }
-  button('retry', '再来一次', L.W / 2 - 160, L.H - 84, 150, 50, startLevel, true);
-  button('map', '回地图', L.W / 2 + 10, L.H - 84, 150, 50, goMap);
+  if (G.near) comicText(ctx, G.near, L.W / 2, 70, 17, '#ffd23f');
+  // 激励视频只放这一刻：差一点的时候
+  const by = L.H - 150;
+  if (G.failReason === 'dead' && G.rescuesLeft > 0) button('rescue', '▶ 小雨拉你起来', L.W / 2 - 160, by, 150, 50, () => callTeammate('rescue'));
+  if (G.failReason === 'dry' && G.ammoAdsLeft > 0) button('ammo', '▶ 小雨扔一发', L.W / 2 - 160, by, 150, 50, () => callTeammate('ammo'));
+  const back = G.arena ? endArena : G.daily ? goTitle : goMap;
+  button('retry', '再来', L.W / 2 + 10, by, 150, 50, G.arena ? startArena : G.daily ? startDaily : retryRound, true);
+  if (G.arena) text('连胜 ' + G.arena.streak + ' · 最好 ' + Math.max(team.state().arenaBest, G.arena.streak), L.W / 2, 96, 14, '#f4f1de', 'center', 800);
+  button('map', G.arena || G.daily ? '主页' : '回地图', L.W / 2 - 60, L.H - 80, 120, 42, back);
 }
 
 // —— 关前那一页：这关有什么新东西 ——
@@ -2897,10 +3062,8 @@ function drawTeach() {
   comicText(ctx, '第 ' + lv.no + ' 关 · ' + lv.name, L.W / 2, 70, 28);
   const lines = [];
   if (lv.index === 0) {
-    lines.push(['谁先暴露谁死', '你露着头才看得见，他也在找你']);
-    lines.push(['左下按住 = 缩头', '躲着最安全，但看不见、打不了']);
-    lines.push(['下面那栋楼是你，红圈是他的镜子', '红圈停在你窗口上会锁定你 → 快缩头']);
-    lines.push(['红圈在动 = 他探着头在找你', '这也是你唯一打得中他的时候']);
+    lines.push(['左下按住 = 缩头', '']);
+    lines.push(['下面的红圈 = 他在找你', '停在你窗口上就快缩头']);
   }
   lv.teach.forEach((l) => l[0] && lines.push(l));
   lines.forEach(([a, b], i) => {
@@ -2943,6 +3106,43 @@ function drawBossIntro() {
   (lv.bossIntro || []).forEach((l, i) => {
     if (t > 1.2 + i * 0.4) text(l, L.W / 2, L.H * 0.74 + i * 26, 15, '#f4f1de', 'center', 800);
   });
+}
+
+// 擂台赢了一个：连胜 +1，抽出下一个加难
+function drawArenaNext() {
+  const ctx = P.ctx;
+  const A = G.arena;
+  const t = G.modeT;
+  ctx.fillStyle = '#1a1030';
+  ctx.fillRect(0, 0, L.W, L.H);
+  const k = easeOut(clamp(t / 0.3, 0, 1));
+  ctx.save();
+  ctx.translate(L.W / 2, L.H * 0.3);
+  ctx.scale(k, k);
+  starburst(ctx, 0, 0, 110, 74, 16, '#e3263b');
+  comicText(ctx, '连胜 ' + A.streak, 0, 0, 40);
+  ctx.restore();
+  if (A.best) text('新纪录！', L.W / 2, L.H * 0.3 + 96, 16, '#ffd23f', 'center', 900);
+  if (A.newMod && t > 0.5) {
+    comicText(ctx, '加难：' + A.newMod.name, L.W / 2, L.H * 0.52, 26, '#ff8a00');
+  }
+  const all = A.mods.map((id) => LV.ARENA_MODS.find((m) => m.id === id).name).join(' · ');
+  if (all) text('现在：' + all, L.W / 2, L.H * 0.6, 12, '#c9c2e0', 'center', 700);
+}
+
+function drawDailyDone() {
+  const ctx = P.ctx;
+  const D2 = G.daily;
+  ctx.fillStyle = '#1a1030';
+  ctx.fillRect(0, 0, L.W, L.H);
+  comicText(ctx, '每日挑战完成', L.W / 2, 90, 32);
+  comicText(ctx, Math.round(D2.sec) + ' 秒', L.W / 2, 180, 48, '#f4f1de');
+  const best = team.state().daily[D2.day];
+  text(D2.best ? '今天的新纪录！' : '今天最好 ' + best + ' 秒', L.W / 2, 240, 16, '#ffd23f', 'center', 900);
+  text('明天会换一局。好友排行等接进微信再做', L.W / 2, 280, 12, '#9a90b0');
+  if (G.modeT < 0.8) return;
+  button('dailyAgain', '再挑战', L.W / 2 + 10, L.H - 120, 150, 54, startDaily, true);
+  button('dailyHome', '主页', L.W / 2 - 160, L.H - 120, 150, 54, goTitle);
 }
 
 // —— 章节地图 ——
@@ -3138,14 +3338,16 @@ function drawTitle() {
   text('缩头找人 · 屏息开枪 · 谁先暴露谁死', L.W / 2, L.H * 0.14 + 92, 13, '#f4f1de', 'center', 700);
 
   const S = team.state();
-  const by = Math.min(L.H - 150, tc.y + d / 2 + 30);
+  const by = Math.min(L.H - 230, tc.y + d / 2 + 24);
   button('start', S.cleared.length ? '继续比赛' : '开始比赛', L.W / 2 - 110, by, 220, 58, goMap, true);
-  button('team', S.revealed ? '战队' : '🔒 战队', L.W / 2 - 160, by + 74, 150, 44, () => {
+  button('arena', '擂台 · 最好 ' + S.arenaBest, L.W / 2 - 160, by + 70, 150, 44, startArena);
+  button('daily', S.daily[dayKey()] ? '每日 · ' + S.daily[dayKey()] + ' 秒' : '每日挑战', L.W / 2 + 10, by + 70, 150, 44, startDaily);
+  button('team', S.revealed ? '战队' : '🔒 战队', L.W / 2 - 160, by + 124, 150, 44, () => {
     if (S.revealed) setMode('team');
     else toast('赢下第一次网吧赛就知道了');
   });
-  button('classic', '原作玩法样机', L.W / 2 + 10, by + 74, 150, 44, startClassic);
-  if (S.money) text('奖金 ¥' + S.money, L.W / 2, by + 136, 13, '#ffd23f', 'center', 800);
+  button('classic', '原作玩法样机', L.W / 2 + 10, by + 124, 150, 44, startClassic);
+  if (S.money) text('奖金 ¥' + S.money, L.W / 2, by + 186, 13, '#ffd23f', 'center', 800);
 }
 
 // —— 原作玩法样机 ——
@@ -3288,6 +3490,8 @@ function render() {
   else if (m === 'loadout') drawLoadout();
   else if (m === 'result') drawResult();
   else if (m === 'bossIntro') drawBossIntro();
+  else if (m === 'arenaNext') drawArenaNext();
+  else if (m === 'dailyDone') drawDailyDone();
   else if (m === 'reveal') drawReveal();
   else if (m === 'move') cut.relocate(ctx, L, G.modeT, G.duel.sc.theme, scopeC, D);
   else if (m === 'rescue') {
@@ -3296,24 +3500,17 @@ function render() {
     if (left < 0.4) cut.iris(ctx, L, scopeC.x, scopeC.y, lerp(D / 2, L.H, left / 0.4));
   } else if (m === 'hit') drawHit();
   else if (m === 'fail') drawFail();
-  else drawScope({ tint: m === 'dead' ? 'rgba(120,20,30,0.45)' : null });
+  else drawScope({});
 
-  if (m === 'play' || m === 'hit' || m === 'intro' || m === 'teach' || m === 'dry' || m === 'ammoGift') drawHud();
+  if (m === 'play' || m === 'hit' || m === 'intro' || m === 'teach' || m === 'ammoGift') drawHud();
   if (m === 'teach') drawTeach();
 
   if (m === 'intro') {
     const R = G.duel.round;
     const o = G.duel.opp;
     const sub = G.duel.sc.theme.name + ' · ' + o.name + (R.cond ? ' · ' + config.conditions[R.cond].name : '');
-    comicPanel(G.level.rounds.length > 1 ? '回合 ' + (G.roundIdx + 1) + ' / ' + G.level.rounds.length : '第 ' + G.level.no + ' 关', sub, '破绽：' + o.tell);
-  } else if (m === 'dead') {
-    panel('你出局了');
-    button('rescue', '▶ 叫小雨拉你起来', L.W / 2 - 120, L.H * 0.52, 240, 58, () => callTeammate('rescue'), true);
-    button('giveup', '不了', L.W / 2 - 60, L.H * 0.52 + 76, 120, 44, () => fail('dead'));
-  } else if (m === 'dry') {
-    panel('子弹打光了');
-    button('ammo', '▶ 让小雨扔一发过来', L.W / 2 - 120, L.H * 0.52, 240, 58, () => callTeammate('ammo'), true);
-    button('giveup2', '不了', L.W / 2 - 60, L.H * 0.52 + 76, 120, 44, () => fail('dry'));
+    const title = G.arena ? '擂台 · 第 ' + (G.arena.streak + 1) + ' 个' : G.level.rounds.length > 1 ? (G.daily ? '每日 ' : '') + '回合 ' + (G.roundIdx + 1) + ' / ' + G.level.rounds.length : '第 ' + G.level.no + ' 关';
+    comicPanel(title, sub, '破绽：' + o.tell);
   } else if (m === 'ammoGift') {
     // 小雨从旁边扔来一发子弹
     const k = clamp(G.modeT / 0.8, 0, 1);
@@ -3360,7 +3557,7 @@ function frame() {
 }
 
 goTitle();
-platform.exposeForTest('__vasily', { G, config, scene, team, cut, LV, scopeC, D, eyeBtn, trigBtn, panelR, scale, setMode, openLevel, startLevel, startRound, afterHit, finishLevel, goMap, startClassic, levelUnlocked });
+platform.exposeForTest('__vasily', { startArena, startDaily, retryRound, G, config, scene, team, cut, LV, scopeC, D, eyeBtn, trigBtn, panelR, scale, setMode, openLevel, startLevel, startRound, afterHit, finishLevel, goMap, startClassic, levelUnlocked });
 platform.nextFrame(frame);
 
 });
@@ -3574,7 +3771,8 @@ function build(seed, duelCfg, D, themeId, extra) {
     const pad = (w - cols * 30) / 2 + 7;
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        b.windows.push({ x: x + pad + col * 30, y: top + 24 + row * 42, w: 16, h: 22, bricked: r() < 0.12 });
+        // 楼上的杂物：空调外机、阳台栏杆（只是看着乱，不会变）
+        b.windows.push({ x: x + pad + col * 30, y: top + 24 + row * 42, w: 16, h: 22, bricked: r() < 0.12, ac: r() < 0.16, balcony: r() < 0.12 });
       }
     }
     buildings.push(b);
@@ -3598,7 +3796,7 @@ function build(seed, duelCfg, D, themeId, extra) {
   const figures = [{ kind: 'sniper', win: spot, lift: 0, pose: r() < 0.5 ? 0 : 1, shift: duelCfg.poseShift || 3, color, sway: 0, swayOn: true, phase: r() * 6 }];
   const nFig = Math.max(1, extra.figures || 1);
   const nDecoy = extra.decoys || 0;
-  const taken = (w) => figures.some((f) => Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 70);
+  const taken = (w) => figures.some((f) => Math.abs(f.win.x - w.x) + Math.abs(f.win.y - w.y) < 50);
   const pool = spots.slice();
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(r() * (i + 1));
@@ -3613,13 +3811,27 @@ function build(seed, duelCfg, D, themeId, extra) {
     figures.push({
       kind: isDecoy ? 'decoy' : 'civ', win: w, lift: isDecoy ? 0 : 1, pose: r() < 0.5 ? 0 : 1, shift: 3, color,
       sway: 0, swayOn: !isDecoy, phase: r() * 6, stick: !isDecoy && r() < 0.35, timer: 1 + r() * 3, lit: false,
+      phone: !isDecoy && r() < 0.35, flashAt: 2 + r() * 5, flashOn: false, // 有的路人拿手机，屏幕也会闪一下（假反光）
     });
   }
   const decoy = figures.find((f) => f.kind === 'decoy') || null;
+  // 像人头的东西：花盆、猫、台灯、人体模特、挂着的大衣、鸟笼。跟人影一样的黑剪影
+  const PROP_TYPES = ['plant', 'cat', 'lamp', 'mannequin', 'coat', 'cage'];
+  const props = [];
+  const propFree = allWindows.filter((w) => !w.bricked && !figures.some((f) => f.win === w));
+  for (let i = propFree.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    const t = propFree[i];
+    propFree[i] = propFree[j];
+    propFree[j] = t;
+  }
+  propFree.slice(0, extra.props || 0).forEach((w) => {
+    props.push({ type: PROP_TYPES[Math.floor(r() * PROP_TYPES.length)], win: w, state: r() < 0.5 ? 0 : 1, x: w.x + 8, y: w.y + 11, color });
+  });
 
   // 干扰：会在你眨眼时变的东西
   const distractors = [];
-  const free = allWindows.filter((w) => !w.bricked && !figures.some((f) => f.win === w));
+  const free = allWindows.filter((w) => !w.bricked && !figures.some((f) => f.win === w) && !props.some((p) => p.win === w));
   for (let i = free.length - 1; i > 0; i--) {
     const j = Math.floor(r() * (i + 1));
     const tmp = free[i];
@@ -3688,6 +3900,7 @@ function build(seed, duelCfg, D, themeId, extra) {
     flakes,
     allWindows,
     figures,
+    props,
     decoy,
     enemy: figures[0], // 狙击手（lift：0 = 缩在窗台下，1 = 探出头）
     night: !!extra.night,
@@ -3737,6 +3950,86 @@ function relocateSniper(sc, rand, D, now) {
   e.win = to;
   e.pose = rand() < 0.5 ? 0 : 1;
   void half;
+}
+
+// 道具的「头」在哪（打中它算打错人）
+function propHead(p) {
+  const w = p.win;
+  const dx = p.type === 'cat' ? (p.state ? 4 : -4) : 0;
+  const dy = { plant: 9, cat: 13, lamp: 7, mannequin: 8, coat: 6, cage: 7 }[p.type] || 8;
+  return { x: w.x + w.w / 2 + dx, y: w.y + dy };
+}
+
+function drawProp(ctx, p, ox, oy, night) {
+  const w = p.win;
+  const h = propHead(p);
+  const x = ox + h.x;
+  const y = oy + h.y;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(ox + w.x, oy + w.y, w.w, w.h);
+  ctx.clip();
+  if (p.type === 'lamp' && p.state) {
+    ctx.fillStyle = 'rgba(255,220,130,0.55)';
+    ctx.fillRect(ox + w.x, oy + w.y, w.w, w.h);
+  }
+  ctx.globalAlpha = night ? 0.35 : 1;
+  ctx.fillStyle = p.color;
+  ctx.beginPath();
+  if (p.type === 'plant') {
+    // 花盆：一团叶子 + 盆
+    ctx.arc(x - 2, y, 3.5, 0, Math.PI * 2);
+    ctx.arc(x + 2.5, y - 1, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(x - 4, y + 3, 8, 8);
+  } else if (p.type === 'cat') {
+    // 猫：圆头 + 两只尖耳朵 + 身子
+    ctx.arc(x, y, 3.2, 0, Math.PI * 2);
+    ctx.moveTo(x - 3, y - 1);
+    ctx.lineTo(x - 2.5, y - 5.5);
+    ctx.lineTo(x - 0.5, y - 2.5);
+    ctx.moveTo(x + 3, y - 1);
+    ctx.lineTo(x + 2.5, y - 5.5);
+    ctx.lineTo(x + 0.5, y - 2.5);
+    ctx.fill();
+    ctx.fillRect(x - 4, y + 2, 9, 6);
+  } else if (p.type === 'lamp') {
+    // 台灯：梯形灯罩 + 杆
+    ctx.moveTo(x - 3, y - 4);
+    ctx.lineTo(x + 3, y - 4);
+    ctx.lineTo(x + 5, y + 2);
+    ctx.lineTo(x - 5, y + 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(x - 0.8, y + 2, 1.6, 10);
+  } else if (p.type === 'mannequin') {
+    // 人体模特：跟人一模一样的剪影，但从来不动
+    ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(x - 7, y + 5, 14, 12);
+  } else if (p.type === 'coat') {
+    // 挂着的大衣和帽子：帽檐 + 肩
+    ctx.arc(x, y, 3.8, Math.PI, 0);
+    ctx.fill();
+    ctx.fillRect(x - 6, y, 12, 1.8);
+    ctx.moveTo(x - 6, y + 14);
+    ctx.lineTo(x - 4, y + 4);
+    ctx.lineTo(x + 4, y + 4);
+    ctx.lineTo(x + 6, y + 14);
+    ctx.fill();
+  } else if (p.type === 'cage') {
+    // 鸟笼：圆顶 + 竖条
+    ctx.arc(x, y + 1, 5, Math.PI, 0);
+    ctx.fill();
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 1;
+    for (let i = -4; i <= 4; i += 2) {
+      ctx.moveTo(x + i, y + 1);
+      ctx.lineTo(x + i, y + 10);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function toggle(d) {
@@ -3867,6 +4160,28 @@ function drawWindow(ctx, w, b, th, ox, oy) {
   } else {
     ctx.fillRect(x, y, w.w, w.h);
     ctx.strokeRect(x, y, w.w, w.h);
+  }
+  if (w.ac) {
+    ctx.fillStyle = '#c9c4d0';
+    ctx.fillRect(x + w.w - 2, y + w.h - 6, 9, 7);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = INK;
+    ctx.strokeRect(x + w.w - 2, y + w.h - 6, 9, 7);
+    ctx.beginPath();
+    ctx.arc(x + w.w + 2.5, y + w.h - 2.5, 2, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  if (w.balcony) {
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y + w.h - 7);
+    ctx.lineTo(x + w.w + 3, y + w.h - 7);
+    for (let i = 0; i <= 5; i++) {
+      ctx.moveTo(x - 3 + i * ((w.w + 6) / 5), y + w.h - 7);
+      ctx.lineTo(x - 3 + i * ((w.w + 6) / 5), y + w.h + 1);
+    }
+    ctx.stroke();
   }
   if (th.extras && th.extras.awning && !w.bricked) {
     const c = th.extras.awning;
@@ -4143,6 +4458,8 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
     sc.figures.forEach((f) => f.lit && glow(f.win));
   }
 
+  sc.props.forEach((p) => drawProp(ctx, p, ox, oy, sc.night));
+
   // 人影：狙击手、路人、头盔假人，都是一样颜色的剪影
   const drop = opt.enemyDrop || 0;
   sc.figures.forEach((f) => {
@@ -4184,6 +4501,16 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
     }
   });
 
+  // 路人的手机屏幕一闪（假反光）
+  sc.figures.forEach((f) => {
+    if (!f.flashOn || f.lift < 0.5) return;
+    const h = figureHead(f);
+    ctx.fillStyle = '#e8f4ff';
+    ctx.beginPath();
+    ctx.arc(ox + h.x + 3, oy + h.y + 3, sc.night ? 3 : 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
   // 焦躁型缩着时敲窗台：窗台上两个小指节一上一下
   if (opt.tap) {
     const w = sc.enemy.win;
@@ -4214,7 +4541,7 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
     const head = enemyHead(sc);
     const gx = ox + head.x - 2;
     const gy = oy + head.y + 1;
-    const r = sc.night ? 10 : 7;
+    const r = sc.night ? 7 : 4.5;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.moveTo(gx, gy - r);
@@ -4328,7 +4655,7 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
   drawWeather(ctx, sc, cam, cx, cy, D, t);
 }
 
-module.exports = { build, draw, enemyHead, decoyHead, figureHead, relocateSniper, toggle, WORLD_W, WORLD_H, GROUND };
+module.exports = { build, draw, enemyHead, decoyHead, figureHead, propHead, relocateSniper, toggle, WORLD_W, WORLD_H, GROUND };
 
 });
 __def("js/sfx.js", function (module, exports, require) {
@@ -4413,7 +4740,7 @@ const TEAMMATES = [
   { id: 'cap', name: '老K', role: '指挥', buff: '稳得快', look: { hair: '#2b2438', jacket: '#e63946', skin: '#e9b48a', style: 'short' },
     desc: (lv) => '屏息稳下来快 ' + lv * 8 + '%', mods: (lv) => ({ settleMul: 1 - 0.08 * lv }) },
   { id: 'spot', name: '小雨', role: '观察手', buff: '报点', female: true, look: { hair: '#1f6f78', jacket: '#2e86ab', skin: '#f1c6a8', style: 'ponytail' },
-    desc: (lv) => '他探头时给你指方向' + (lv >= 3 ? '·每场多拉一次' : '·3级多拉一次'),
+    desc: (lv) => '红圈靠近你提前报警' + (lv >= 3 ? '·每关多拉一次' : '·3级多拉一次'),
     mods: (lv) => ({ peekCue: lv >= 1, rescueAdd: lv >= 3 ? 1 : 0 }) },
   { id: 'entry', name: '阿豆', role: '突破手', buff: '冷静', look: { hair: '#6b3e26', jacket: '#f4a261', skin: '#d99a6c', style: 'buzz' },
     desc: (lv) => '心跳慢 ' + lv * 12 + '%', mods: (lv) => ({ heartMul: 1 - 0.12 * lv }) },
@@ -4434,7 +4761,7 @@ const BASES = [
 const CARDS = [
   { id: 'breath', name: '深呼吸', desc: '稳住多撑 1 秒', icon: 'lung', mods: { holdMaxAdd: 1 } },
   { id: 'scope', name: '好镜子', desc: '判定圈大一圈', icon: 'scope', mods: { hitRadiusAdd: 3 } },
-  { id: 'ear', name: '耳机', desc: '他探头时指方向', icon: 'ear', mods: { peekCue: true } },
+  { id: 'ear', name: '耳机', desc: '红圈靠近提前报警', icon: 'ear', mods: { peekCue: true } },
   { id: 'gum', name: '口香糖', desc: '心跳慢一半', icon: 'heart', mods: { heartMul: 0.5 } },
   { id: 'silencer', name: '消音器', desc: '打空不暴露', icon: 'bullet', mods: { silent: true } },
   { id: 'helmet', name: '诱饵头盔', desc: '替你挨一枪，照出他', icon: 'helmet', mods: { helmets: 1 } },
@@ -4460,12 +4787,15 @@ const MUL = ['settleMul', 'heartMul', 'enemyRateMul', 'reloadMul'];
 function fresh() {
   const team = {};
   TEAMMATES.forEach((m) => (team[m.id] = 1));
-  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0, stars: {}, cleared: [] };
+  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0, stars: {}, cleared: [], taught: [], arenaBest: 0, daily: {} };
 }
 
 let S = Object.assign(fresh(), platform.load(SAVE_KEY) || {});
 if (!S.stars) S.stars = {};
 if (!S.cleared) S.cleared = [];
+if (!S.taught) S.taught = [];
+if (!S.arenaBest) S.arenaBest = 0;
+if (!S.daily) S.daily = {};
 
 function save() {
   platform.save(SAVE_KEY, S);
@@ -4545,6 +4875,32 @@ function recordLevel(id, stars) {
   return { first, newStars: Math.max(0, stars - old) };
 }
 
+// 关前说明页只看一次
+function taught(id) {
+  return S.taught.indexOf(id) >= 0;
+}
+function markTaught(id) {
+  if (!taught(id)) {
+    S.taught.push(id);
+    save();
+  }
+}
+
+// 擂台最高连胜；每日挑战每天的最好用时
+function recordArena(streak) {
+  const best = streak > S.arenaBest;
+  if (best) S.arenaBest = streak;
+  save();
+  return best;
+}
+function recordDaily(day, sec) {
+  const old = S.daily[day];
+  const best = !old || sec < old;
+  if (best) S.daily[day] = Math.round(sec);
+  save();
+  return best;
+}
+
 function totalStars() {
   return Object.keys(S.stars).reduce((a, k) => a + S.stars[k], 0);
 }
@@ -4583,7 +4939,7 @@ module.exports = {
   TEAMMATES, BASES, CARDS, MAX_LV,
   state: () => S,
   save, reset, mods, trainCost, train, upgradeBase, earn, reveal, drawCards,
-  recordLevel, totalStars, rank, unlockedCards, RANKS,
+  recordLevel, totalStars, rank, unlockedCards, RANKS, taught, markTaught, recordArena, recordDaily,
 };
 
 });

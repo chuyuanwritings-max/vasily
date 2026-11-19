@@ -16,7 +16,7 @@ const TEAMMATES = [
   { id: 'cap', name: '老K', role: '指挥', buff: '稳得快', look: { hair: '#2b2438', jacket: '#e63946', skin: '#e9b48a', style: 'short' },
     desc: (lv) => '屏息稳下来快 ' + lv * 8 + '%', mods: (lv) => ({ settleMul: 1 - 0.08 * lv }) },
   { id: 'spot', name: '小雨', role: '观察手', buff: '报点', female: true, look: { hair: '#1f6f78', jacket: '#2e86ab', skin: '#f1c6a8', style: 'ponytail' },
-    desc: (lv) => '他探头时给你指方向' + (lv >= 3 ? '·每场多拉一次' : '·3级多拉一次'),
+    desc: (lv) => '红圈靠近你提前报警' + (lv >= 3 ? '·每关多拉一次' : '·3级多拉一次'),
     mods: (lv) => ({ peekCue: lv >= 1, rescueAdd: lv >= 3 ? 1 : 0 }) },
   { id: 'entry', name: '阿豆', role: '突破手', buff: '冷静', look: { hair: '#6b3e26', jacket: '#f4a261', skin: '#d99a6c', style: 'buzz' },
     desc: (lv) => '心跳慢 ' + lv * 12 + '%', mods: (lv) => ({ heartMul: 1 - 0.12 * lv }) },
@@ -37,7 +37,7 @@ const BASES = [
 const CARDS = [
   { id: 'breath', name: '深呼吸', desc: '稳住多撑 1 秒', icon: 'lung', mods: { holdMaxAdd: 1 } },
   { id: 'scope', name: '好镜子', desc: '判定圈大一圈', icon: 'scope', mods: { hitRadiusAdd: 3 } },
-  { id: 'ear', name: '耳机', desc: '他探头时指方向', icon: 'ear', mods: { peekCue: true } },
+  { id: 'ear', name: '耳机', desc: '红圈靠近提前报警', icon: 'ear', mods: { peekCue: true } },
   { id: 'gum', name: '口香糖', desc: '心跳慢一半', icon: 'heart', mods: { heartMul: 0.5 } },
   { id: 'silencer', name: '消音器', desc: '打空不暴露', icon: 'bullet', mods: { silent: true } },
   { id: 'helmet', name: '诱饵头盔', desc: '替你挨一枪，照出他', icon: 'helmet', mods: { helmets: 1 } },
@@ -63,12 +63,15 @@ const MUL = ['settleMul', 'heartMul', 'enemyRateMul', 'reloadMul'];
 function fresh() {
   const team = {};
   TEAMMATES.forEach((m) => (team[m.id] = 1));
-  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0, stars: {}, cleared: [] };
+  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0, stars: {}, cleared: [], taught: [], arenaBest: 0, daily: {} };
 }
 
 let S = Object.assign(fresh(), platform.load(SAVE_KEY) || {});
 if (!S.stars) S.stars = {};
 if (!S.cleared) S.cleared = [];
+if (!S.taught) S.taught = [];
+if (!S.arenaBest) S.arenaBest = 0;
+if (!S.daily) S.daily = {};
 
 function save() {
   platform.save(SAVE_KEY, S);
@@ -148,6 +151,32 @@ function recordLevel(id, stars) {
   return { first, newStars: Math.max(0, stars - old) };
 }
 
+// 关前说明页只看一次
+function taught(id) {
+  return S.taught.indexOf(id) >= 0;
+}
+function markTaught(id) {
+  if (!taught(id)) {
+    S.taught.push(id);
+    save();
+  }
+}
+
+// 擂台最高连胜；每日挑战每天的最好用时
+function recordArena(streak) {
+  const best = streak > S.arenaBest;
+  if (best) S.arenaBest = streak;
+  save();
+  return best;
+}
+function recordDaily(day, sec) {
+  const old = S.daily[day];
+  const best = !old || sec < old;
+  if (best) S.daily[day] = Math.round(sec);
+  save();
+  return best;
+}
+
 function totalStars() {
   return Object.keys(S.stars).reduce((a, k) => a + S.stars[k], 0);
 }
@@ -186,5 +215,5 @@ module.exports = {
   TEAMMATES, BASES, CARDS, MAX_LV,
   state: () => S,
   save, reset, mods, trainCost, train, upgradeBase, earn, reveal, drawCards,
-  recordLevel, totalStars, rank, unlockedCards, RANKS,
+  recordLevel, totalStars, rank, unlockedCards, RANKS, taught, markTaught, recordArena, recordDaily,
 };

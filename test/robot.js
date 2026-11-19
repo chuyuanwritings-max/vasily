@@ -70,7 +70,14 @@ const fs = require('fs');
   await snap('05_回合卡');
   await tap(); await page.waitForTimeout(200);
   check((await mode()) === 'play', '点两下进对狙');
-  check((await g(() => __vasily.G.duel.sc.figures.length)) === 2, '第一关对面两个人影，只有一个是狙击手');
+  check((await g(() => __vasily.G.duel.sc.figures.length)) === 4, '第一关对面四个人影，只有一个是狙击手');
+  check((await g(() => __vasily.G.duel.sc.props.length)) >= 6, '窗里还有像人头的东西（花盆、猫、台灯、模特……）');
+  const propShot = await g(() => {
+    const V = __vasily; const d = V.G.duel; const p = d.sc.props[0]; const h = V.scene.propHead(p);
+    d.cam.x = h.x; d.cam.y = h.y; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1;
+    const r = d.triggerUp(); d.bullets += 1; d.timeLeft += 8; return r.kind;
+  });
+  check(propShot === 'wrong', '打中花盆、模特这些东西：算打错人');
 
   // 缩头 = 眨眼
   const pose0 = await g(() => __vasily.G.duel.sc.enemy.pose);
@@ -127,7 +134,9 @@ const fs = require('fs');
   // 子弹打光 → 小雨扔一发（广告占位）
   await g(() => { const d = __vasily.G.duel; d.lock = 0; d.heat = 0; d.drawLeft = -1; d.cam.x = 600; d.cam.y = 200; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; d.recoverSec = 0; d.duck = 0; d.holding = true; d.holdSec = 1; d.triggerUp(); });
   await page.waitForTimeout(150);
-  check((await mode()) === 'dry', '三发都浪费了：子弹打光');
+  await page.waitForFunction(() => ['fail', 'play'].includes(__vasily.G.mode), null, { timeout: 3000 });
+  check((await mode()) === 'fail' && (await g(() => __vasily.G.failReason)) === 'dry', '三发都浪费了：子弹打光');
+  check((await g(() => __vasily.G.near)).indexOf('最近一枪') === 0, '失败页写清差多少：' + (await g(() => __vasily.G.near)));
   await snap('09_子弹打光');
   await clickBtn('ammo');
   check((await mode()) === 'ad', '让小雨扔子弹：先放广告占位');
@@ -166,7 +175,8 @@ const fs = require('fs');
   await g(() => { const d = __vasily.G.duel; d.helmets = 0; d.enemy.mode = 'peek'; d.enemy.timer = 9; d.seek.x = d.seek.tx = d.me.c; d.seek.y = d.seek.ty = d.me.r; d.seek.dwell = 9; d.lock = 0.95; });
   await page.waitForFunction(() => __vasily.G.duel.drawLeft >= 0, null, { timeout: 3000 });
   await snap('13_他瞄准你');
-  await page.waitForFunction(() => __vasily.G.mode === 'dead', null, { timeout: 3000 });
+  await page.waitForFunction(() => __vasily.G.mode === 'fail', null, { timeout: 3000 });
+  check((await g(() => __vasily.G.near)).length > 0, '被打死：失败页写差多少，「小雨拉你起来」就在这一页');
   await clickBtn('rescue');
   await page.waitForFunction(() => __vasily.G.mode === 'rescue', null, { timeout: 5000 });
   await page.waitForFunction(() => __vasily.G.mode === 'play', null, { timeout: 5000 });
@@ -216,6 +226,11 @@ const fs = require('fs');
   await g(() => { __vasily.G.duel.timeLeft = 0.05; });
   await page.waitForFunction(() => __vasily.G.mode === 'fail', null, { timeout: 3000 });
   check((await g(() => __vasily.G.failReason)) === 'timeout', '倒计时到了：输');
+  await page.waitForTimeout(300);
+  await clickBtn('retry');
+  check((await mode()) === 'play', '输了点一下「再来」：直接回到这个回合开打（不放说明页）');
+  const rs = await g(() => __vasily.G.metrics.retrySec.slice(-1)[0]);
+  check(rs < 3, '死到重开 ' + rs + ' 秒（≤ 3 秒）');
 
   // —— Boss：三条命，每挨一枪换一招 ——
   await g(() => { const s = __vasily.team.state(); s.cleared.push('c8'); ['c1', 'c2', 'c3', 'c4', 'c5'].forEach((id) => (s.stars[id] = 2)); });
@@ -237,6 +252,40 @@ const fs = require('fs');
   await clickBtn('continue');
   check((await mode()) === 'reveal', '继续：放网吧揭晓');
 
+  // 擂台：赢一个叠一个加难，输了从头来
+  await g(() => __vasily.startArena());
+  await page.waitForTimeout(450);
+  await tap();
+  check((await mode()) === 'play' && (await g(() => __vasily.G.arena.streak)) === 0, '擂台：开打');
+  await shootSniper();
+  await page.waitForFunction(() => __vasily.G.mode === 'arenaNext', null, { timeout: 4000 });
+  check(await g(() => __vasily.G.arena.streak === 1 && __vasily.G.arena.mods.length === 1), '擂台赢一个：连胜 1，叠一个加难');
+  await page.waitForTimeout(400); await snap('20_擂台连胜');
+  await page.waitForFunction(() => __vasily.G.mode === 'intro', null, { timeout: 4000 });
+  await page.waitForTimeout(450);
+  await tap();
+  await g(() => { __vasily.G.duel.timeLeft = 0.05; });
+  await page.waitForFunction(() => __vasily.G.mode === 'fail', null, { timeout: 3000 });
+  check((await g(() => __vasily.team.state().arenaBest)) >= 1, '擂台输了：记下最高连胜');
+  await clickBtn('retry');
+  check(await g(() => __vasily.G.arena.streak === 0 && __vasily.G.arena.mods.length === 0), '擂台再来：从头打');
+
+  // 每日挑战：今天同一局，重来还是同一局
+  await g(() => __vasily.startDaily());
+  const layout1 = await g(() => __vasily.G.duel.sc.figures.map((f) => f.win.x + ',' + f.win.y).join('|'));
+  await g(() => __vasily.startDaily());
+  const layout2 = await g(() => __vasily.G.duel.sc.figures.map((f) => f.win.x + ',' + f.win.y).join('|'));
+  check(layout1 === layout2 && (await g(() => __vasily.G.level.rounds.length)) === 3, '每日挑战：今天所有人同一局（三个回合），重来也一样');
+  await page.waitForTimeout(450);
+  await tap();
+  for (let i = 0; i < 3; i++) {
+    await shootSniper();
+    if (i < 2) { await page.waitForFunction(() => __vasily.G.mode === 'move', null, { timeout: 4000 }); await g(() => { __vasily.G.mode = 'play'; }); }
+  }
+  await page.waitForFunction(() => __vasily.G.mode === 'dailyDone', null, { timeout: 5000 });
+  await page.waitForTimeout(900); await snap('21_每日挑战完成');
+  check((await g(() => Object.keys(__vasily.team.state().daily).length)) === 1, '每日挑战打完：记下今天的用时');
+
   // 原作玩法样机还在
   await g(() => __vasily.startClassic());
   await page.mouse.click(...at(btn.trig));
@@ -248,8 +297,8 @@ const fs = require('fs');
     const ids = ['oldtown', 'market', 'tanks', 'port', 'station', 'factory', 'neon', 'desert', 'eaves'];
     let bad = 0, short = 0;
     for (let s = 1; s <= 300; s++) {
-      const sc = scene.build(s * 7, { poseShift: 3, contrast: 0.2 }, D, ids[s % 9], { figures: 5, decoys: 1 });
-      if (sc.figures.length < 6) short++;
+      const sc = scene.build(s * 7, { poseShift: 3, contrast: 0.2 }, D, ids[s % 9], { figures: 8, decoys: 2, props: 14 });
+      if (sc.figures.length < 10) short++;
       sc.figures.forEach((f) => {
         const h = scene.figureHead(f, 1);
         if (h.x < D / 2 - 8 || h.x > sc.w - D / 2 + 8 || h.y < D / 2 || h.y > sc.h - D / 2) bad++;
@@ -257,7 +306,7 @@ const fs = require('fs');
     }
     return { bad, short };
   });
-  check(fair.bad === 0 && fair.short === 0, '九张背景 300 个随机局：六个人影都摆得下，而且都能瞄到');
+  check(fair.bad === 0 && fair.short === 0, '九张背景 300 个随机局：八个人影加两个假人都摆得下，而且都能瞄到');
 
   check(errors.length === 0, '没有报错' + (errors.length ? '：' + errors.join(' | ') : ''));
   await browser.close();

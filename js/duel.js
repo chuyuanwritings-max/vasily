@@ -40,6 +40,7 @@ function createDuel(opts) {
     night: cond === 'night',
     pigeons: cond === 'pigeons',
     escort: R.goal === 'escort',
+    props: R.props === undefined ? 10 : R.props,
   });
   const half = opts.scopeD / 2;
   const rand = rng(opts.seed ^ 0x5bd1e995);
@@ -102,7 +103,13 @@ function createDuel(opts) {
   };
 
   function tactic() {
-    return Object.assign({}, opp, phases[d.phase] || {});
+    const t = Object.assign({}, opp, phases[d.phase] || {});
+    // 擂台加难：他找得更快
+    if (R.seekMul) {
+      t.seekSpeed *= R.seekMul;
+      t.heatRate *= R.seekMul;
+    }
+    return t;
   }
   d.tactic = tactic;
   sc.enemy.swayOn = !tactic().still;
@@ -167,12 +174,14 @@ function createDuel(opts) {
     });
     const inView = [];
     const outView = [];
-    sc.distractors.forEach((x) => {
+    const pool = sc.distractors.concat(sc.props.filter((p) => p.type === 'cat' || p.type === 'lamp'));
+    pool.forEach((x) => {
       const near = Math.abs(x.x - d.cam.x) < half && Math.abs(x.y - d.cam.y) < half;
       (near ? inView : outView).push(x);
     });
     const shuffle = (arr) => arr.sort(() => Math.random() - 0.5);
-    shuffle(inView).concat(shuffle(outView)).slice(0, 2 + d.levelIndex % 3).forEach(scene.toggle);
+    const n = R.changes || 4 + Math.min(4, Math.floor(d.levelIndex / 2));
+    shuffle(inView).concat(shuffle(outView)).slice(0, n).forEach(scene.toggle);
   }
 
   // —— 开枪 ——
@@ -215,6 +224,7 @@ function createDuel(opts) {
     if (!kind) {
       const other = sc.figures.find((f) => f !== sc.enemy && f.lift > 0.4 && Math.hypot(aim.x - scene.figureHead(f).x, aim.y - scene.figureHead(f).y) <= OTHER_R);
       if (other) kind = other.kind === 'decoy' ? 'decoy' : 'wrong';
+      else if (sc.props.some((p) => Math.hypot(aim.x - scene.propHead(p).x, aim.y - scene.propHead(p).y) <= OTHER_R)) kind = 'wrong';
     }
     if (!kind) {
       if (!d.enemyExposed() && dist <= d.hitRadius + 6) kind = 'covered';
@@ -428,6 +438,13 @@ function createDuel(opts) {
       f.phase += dt;
       f.sway = f.swayOn ? Math.sin(f.phase * 1.7) * 1.6 : 0;
       if (f.kind === 'civ') {
+        if (f.phone) {
+          f.flashAt -= dt;
+          if (f.flashAt <= 0) {
+            f.flashOn = !f.flashOn;
+            f.flashAt = f.flashOn ? 0.25 : 2.5 + rand() * 4;
+          }
+        }
         f.timer -= dt;
         if (f.timer <= 0) {
           if (f.lift > 0.5 && rand() < 0.45) {
@@ -633,7 +650,7 @@ function createDuel(opts) {
     if (d.state !== 'play' && d.state !== 'hit') return false;
     if (d.drawLeft >= 0 || d.flashSec > 0) return true;
     if (!d.searching() || d.aimingMate() || !d.enemyExposed()) return false;
-    return d.seekDist() < S.glintCells && (d.t * 1.2) % 1 < 0.3;
+    return d.seekDist() <= S.glintCells && (d.t * 1.2) % 1 < 0.18;
   };
   // 枪管：他探头找你时露出来
   d.barrel = function () {
