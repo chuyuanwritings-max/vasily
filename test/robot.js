@@ -39,7 +39,7 @@ const fs = require('fs');
   });
   // 打开某一关一直到能开枪
   const enterLevel = async (i) => {
-    await g((k) => { const V = __vasily; V.openLevel(V.LV.LEVELS[k]); }, i);
+    await g((k) => { const V = __vasily; V.openLevel(V.LV.CAFE[k]); }, i);
     await page.waitForTimeout(100);
     await clickBtn('go');
     await page.waitForTimeout(700);
@@ -48,27 +48,123 @@ const fs = require('fs');
     await tap(); await page.waitForTimeout(200);
   };
 
-  // —— 开场 → 地图 ——
+  // —— 开场 → 第一座城（0.8 照《Sniper 3D》） ——
   await snap('01_开场');
   check((await mode()) === 'title', '打开先是开场界面');
   await clickBtn('start');
-  check((await mode()) === 'map', '点「开始比赛」进第一章地图');
+  check((await mode()) === 'map', '点「开始比赛」进第一座城的地图');
+  const cityInfo = await g(() => { const L = __vasily.LV.LEVELS; const n = (t) => L.filter((l) => l.type === t).length; return { all: L.length, a: n('教学'), b: n('主线'), c: n('特别任务') }; });
+  check(cityInfo.all === 20 && cityInfo.a === 3 && cityInfo.b === 12 && cityInfo.c === 5, '第一座城 20 关：教学 3、主线 12、特别任务 5');
   await snap('02_地图');
-  await clickBtn('lv_c2');
+  await clickBtn('lv_d2');
   check((await g(() => __vasily.G.toast && __vasily.G.toast.text)) === '先过前一关', '第二关锁着：先过前一关');
 
-  // —— 第一关 ——
-  await clickBtn('lv_c1');
-  check((await mode()) === 'loadout', '点第一关：看目标、带一张卡');
-  check((await g(() => __vasily.team.unlockedCards().length)) === 2, '一开始有两张卡可带');
-  await snap('03_带卡');
-  await clickBtn('go');
-  await page.waitForTimeout(900);
-  check((await mode()) === 'teach', '开打前有一页讲这关的新东西');
-  await snap('04_说明');
-  await tap(); await page.waitForTimeout(400);
-  await snap('05_回合卡');
+  // —— 第一关：目标卡 → 全景 → 点一下放大 → 开枪 ——
+  await clickBtn('lv_d1');
+  check((await mode()) === 'teach', '第一关不带卡，直接一页说明（点全景放大、按住开枪）');
+  await snap('03_说明');
+  await page.waitForTimeout(700); await tap(); await page.waitForTimeout(650);
+  check((await mode()) === 'brief', '开局一张目标卡：一句话 + 特征图标');
+  await snap('04_目标卡');
+  check((await g(() => __vasily.G.duel.kind === 'mission' && __vasily.G.duel.targets.length === 1 && __vasily.G.duel.sc.people.length === 4)), '第一关四个人，只有一个穿红衣服');
   await tap(); await page.waitForTimeout(200);
+  check((await mode()) === 'play' && !(await g(() => __vasily.G.zoom)), '先看全景');
+  await snap('05_全景');
+  await page.mouse.click(...at(btn.trig));
+  check(!(await g(() => __vasily.G.zoom)) && (await g(() => __vasily.G.duel.shots)) === 0, '全景里不能开枪：要先放大');
+  const tp = await g(() => { const V = __vasily; const p = V.G.duel.targets[0]; return p.where === 'win' ? { x: p.x, y: p.y + 8 } : { x: p.x, y: p.y - 30 }; });
+  const wideY = await g(() => __vasily.scopeC.y - (375 * 600 / 860) / 2);
+  await page.mouse.click((tp.x * 375 / 860) * S, (wideY + tp.y * 375 / 860) * S);
+  await page.waitForTimeout(200);
+  const zc = await g(() => ({ z: __vasily.G.zoom, x: __vasily.G.duel.cam.x, y: __vasily.G.duel.cam.y }));
+  check(zc.z && Math.abs(zc.x - tp.x) < 6 && Math.abs(zc.y - tp.y) < 6, '点全景里的一处：镜子放大到那里');
+  await snap('06_放大');
+  // 打错人：路人吓得躲起来，扣 8 秒
+  const mw = await g(() => {
+    const V = __vasily; const d = V.G.duel; const c = d.sc.people.find((p) => p.role === 'civ');
+    const h = c.where === 'win' ? { x: c.x, y: c.y + 8 } : { x: c.x, y: c.y - 30 };
+    d.cam.x = h.x; d.cam.y = h.y; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1;
+    const t0 = d.timeLeft; const r = d.triggerUp(); return { kind: r.kind, dt: t0 - d.timeLeft, hid: !!c.hid, down: !!c.down };
+  });
+  check(mw.kind === 'wrong' && mw.dt >= 7.9 && mw.hid && !mw.down, '打错人：路人吓得躲起来（没有血），扣 8 秒');
+  await page.waitForTimeout(150); await snap('07_打错人');
+  const mh = await g(() => {
+    const V = __vasily; const d = V.G.duel; const p = d.targets[0]; const h = p.where === 'win' ? { x: p.x, y: p.y + 8 } : { x: p.x, y: p.y - 30 };
+    d.cam.x = h.x; d.cam.y = h.y; d.sway.x = 0; d.sway.y = 0; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1; return d.triggerUp();
+  });
+  check(mh.hit && mh.head, '准星对着他的头：爆头');
+  await page.waitForTimeout(700); await snap('08_爆头');
+  await page.waitForFunction(() => __vasily.G.mode === 'result', null, { timeout: 4000 });
+  await page.waitForTimeout(2500); await snap('09_结算');
+  const mr = await g(() => ({ r: __vasily.G.resultInfo, s: __vasily.team.state(), next: __vasily.levelUnlocked(__vasily.LV.LEVELS[1]) }));
+  check(mr.r.conds[0] && !mr.r.conds[1] && mr.r.stars === 2 && mr.r.heads === 1, '结算：爆头那颗星拿到，打错过人那颗没拿到');
+  check(mr.s.money >= 20 + 10 * 2 + 15 && mr.next, '金币：过关 + 星星 + 爆头另外多给；开下一关');
+
+  // —— 升级枪 ——
+  await clickBtn('resMap');
+  await g(() => { __vasily.team.state().money += 500; });
+  await clickBtn('mapGun');
+  check((await mode()) === 'gun', '地图页「升级枪」');
+  await clickBtn('gun_zoom'); await clickBtn('gun_clip');
+  await snap('10_升级枪');
+  const gun = await g(() => { const V = __vasily; const S = V.team.state(); return { z: S.gun.zoom, c: S.gun.clip, m: V.team.gunMods() }; });
+  check(gun.z === 1 && gun.c === 1 && gun.m.hitRadiusAdd > 0 && gun.m.clipAdd === 1, '升级瞄准镜、弹匣：判定圈变大、每关多一发');
+  await clickBtn('gunBack');
+
+  // —— 二十关都能生成，而且线索只对得上目标 ——
+  const uniq = await g(() => {
+    const V = __vasily; const { createMission } = __require('')('./js/mission.js'); const people = __require('')('./js/people.js');
+    let bad = [], n = 0;
+    V.LV.LEVELS.forEach((lv) => lv.rounds.forEach((R) => {
+      if (!R.mission) return;
+      for (let s = 0; s < 40; s++) {
+        const d = createMission({ seed: s * 31 + 7, config: V.config, scopeD: V.D, round: R, levelIndex: lv.index });
+        const keys = Object.keys(R.mission.clue || {});
+        const want = R.mission.targets === undefined ? 1 : R.mission.targets;
+        if (d.targets.length !== want) bad.push(lv.id + ' 目标数 ' + d.targets.length);
+        if (keys.length) {
+          const m = d.sc.people.filter((p) => people.matches(p.traits, R.mission.clue)).length;
+          if (m !== want) bad.push(lv.id + ' 对得上线索的 ' + m);
+        }
+        n++;
+      }
+    }));
+    return { bad: bad.slice(0, 5), n };
+  });
+  check(uniq.bad.length === 0, '每关 40 个随机局（共 ' + uniq.n + ' 局）：对得上线索的只有目标' + (uniq.bad.length ? '：' + uniq.bad.join(' | ') : ''));
+
+  // —— 各种花样 ——
+  const kinds = await g(() => {
+    const V = __vasily; const { createMission } = __require('')('./js/mission.js'); const people = __require('')('./js/people.js');
+    const mk = (id) => { const lv = V.LV.LEVELS.find((l) => l.id === id); return createMission({ seed: 77, config: V.config, scopeD: V.D, round: lv.rounds[0], levelIndex: lv.index }); };
+    const run = (d, sec, each) => { for (let i = 0; i < sec * 60 && d.state === 'play'; i++) { d.update(1 / 60); if (each) each(d); } return d.state; };
+    const shoot = (d, h) => { d.cam.x = h.x; d.cam.y = h.y; d.sway = { x: 0, y: 0 }; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1; d.duck = 0; return d.triggerUp(); };
+    const out = {};
+    out.runner = run(mk('d3'), 60);
+    out.bomber = run(mk('d11'), 30);
+    const du = mk('d5'); out.duelDead = run(du, 10);
+    const du2 = mk('d5'); run(du2, 3, (d) => { d.duckHeld = true; }); out.duelDuck = du2.drawLeft > 6 && du2.state === 'play';
+    out.car = run(mk('s1'), 60);
+    const lt = mk('s4'); shoot(lt, people.head(lt.targets[0])); out.lightFlee = run(lt, 6);
+    const lt2 = mk('s4'); const L = lt2.sc.lamp; shoot(lt2, { x: L.x, y: L.y - 4 }); const lampOff = !L.on;
+    lt2.targets.forEach((p) => shoot(lt2, people.head(p))); out.lightWin = lampOff && lt2.state === 'hit';
+    const as = mk('d12'); let gunSeen = false; run(as, 15, (d) => { if (d.targets[0].traits.gun) gunSeen = true; }); out.assassin = gunSeen;
+    const mu = mk('d8'); const r1 = shoot(mu, people.head(mu.targets[0])); out.multi = r1.hit && mu.state === 'play' && mu.targetsLeft() === 4;
+    const dk = mk('s2'); let lit = false; run(dk, 6, (d) => { if (d.targets.some((p) => p.lighter > 0)) lit = true; }); out.dark = lit && dk.sc.night;
+    return out;
+  });
+  check(kinds.runner === 'escaped', '会跑：他跑出画面就输');
+  check(kinds.bomber === 'boom', '炸弹包：倒计时到零就炸，输');
+  check(kinds.duelDead === 'dead' && kinds.duelDuck, '一枪定生死：露着头他的倒计时就走，缩着头他慢慢丢了你');
+  check(kinds.car === 'escaped', '追车：车开出画面就跑了');
+  check(kinds.lightFlee === 'escaped' && kinds.lightWin, '先打灯：灯亮着打倒一个其他人就跑；先打灭灯就能一个个打');
+  check(kinds.assassin, '装成路人：他会突然掏枪');
+  check(kinds.multi, '限时多杀：打倒一个还剩四个，接着打');
+  check(kinds.dark, '暗处交易：夜里，看打火机的光');
+  check(await g(() => { const s5 = __vasily.LV.LEVELS.find((l) => l.id === 's5'); const s3 = __vasily.LV.LEVELS.find((l) => l.id === 's3'); return s5.rounds.length === 5 && !s5.rounds[0].mission && s3.rounds[0].goal === 'escort'; }), '特别任务三、五是对狙：掩护小雨、五个藏着的狙击手');
+
+  // —— 0.7 的网吧赛对狙：规则照旧（不在地图上，第二章可能拿回来） ——
+  await enterLevel(0);
   check((await mode()) === 'play', '点两下进对狙');
   check((await g(() => __vasily.G.duel.sc.figures.length)) === 4, '第一关对面四个人影，只有一个是狙击手');
   check((await g(() => __vasily.G.duel.sc.props.length)) >= 6, '窗里还有像人头的东西（花盆、猫、台灯、模特……）');
@@ -157,7 +253,7 @@ const fs = require('fs');
   const res = await g(() => ({ r: __vasily.G.resultInfo, s: __vasily.team.state() }));
   check(res.r.stars >= 1 && res.s.stars.c1 === res.r.stars && res.s.money > 0, '过关：记下星星（' + res.r.stars + ' 颗）、拿奖金');
   check(!res.r.conds[0], '浪费了子弹：「一发没浪费」那颗星没拿到');
-  check(await g(() => __vasily.team.unlockedCards().length === 3 && __vasily.levelUnlocked(__vasily.LV.LEVELS[1])), '第一次过关：解锁下一关和一张新卡');
+  check(await g(() => __vasily.team.state().cleared.indexOf('c1') >= 0), '对狙过关也记账');
 
   // —— 第三关：两个回合，中间换点位；焦躁型敲窗台 ——
   await g(() => { __vasily.team.state().cleared.push('c2'); });
@@ -310,8 +406,8 @@ const fs = require('fs');
   check(fair.n === 12 && fair.bad === 0 && fair.short === 0 && fair.clash === 0, '十二张地图 600 个随机局：八个人影加两个假人都摆得下、都能瞄到，不跟误导物挤一扇窗');
 
   // 第一章换了地图：沙漠土楼镇开场，城市在第五关（Cc 定）
-  const maps = await g(() => __vasily.LV.LEVELS.map((lv) => lv.rounds[0].theme).join(','));
-  check(maps === 'desert,med,station,port,oldtown,farm,temple,castle,plant', '第一章九关九张地图：沙漠开场，城市在第五关，Boss 在电厂');
+  const maps = await g(() => __vasily.LV.CAFE.map((lv) => lv.rounds[0].theme).join(','));
+  check(maps === 'desert,med,station,port,oldtown,farm,temple,castle,plant', '对狙九关九张地图：沙漠开场，城市在第五关，Boss 在电厂');
 
   // 遮挡：火车挡住他那扇窗时他看不见你，子弹也打在车厢上；玻璃反光只晃你的眼，不挡他
   const cov = await g(() => {

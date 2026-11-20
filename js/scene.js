@@ -2,6 +2,7 @@
 // 分三层画出透视：远景（移得慢）、中景楼房（藏人的地方）、近景掩体（移得快）。
 const { rng, mix } = require('./util.js');
 const themes = require('./themes.js');
+const people = require('./people.js');
 
 const WORLD_W = 860;
 const WORLD_H = 600;
@@ -11,6 +12,7 @@ const FAR_PARALLAX = 0.55;
 const NEAR_PARALLAX = 1.25;
 
 const CLOTH = ['#e84855', '#2e86ab', '#f4f1de', '#f9c74f', '#90be6d'];
+const RUGS = ['#8a5a3a', '#5a7a6a', '#6a5a7a', '#9a7a4a', '#4a5a6a'];
 
 // —— 楼怎么排：每张地图一种排法 ——
 // 藏身位一律 16 × 22（人影、误导物、判定都按这个大小），只是画出来的样子不一样
@@ -274,7 +276,9 @@ function build(seed, duelCfg, D, themeId, extra) {
   // 每张地图自己的「会变的东西」：窗帘、挂毯、百叶窗、集装箱门、藤蔓、火把、百叶帘……
   free.slice(0, 16).forEach((w) => {
     const kind = th.changers[Math.floor(r() * th.changers.length)];
-    distractors.push({ kind, win: w, state: r() < 0.5 ? 0 : 1, x: w.x + 8, y: w.y + 11, colors: [CLOTH[Math.floor(r() * CLOTH.length)], CLOTH[Math.floor(r() * CLOTH.length)]] });
+    // 挂毯、破布用暗一点的土色：跟人的衣服颜色分开（0.8 认人靠衣服颜色）
+    const pal = kind === 'rug' || kind === 'rag' ? RUGS : CLOTH;
+    distractors.push({ kind, win: w, state: r() < 0.5 ? 0 : 1, x: w.x + 8, y: w.y + 11, colors: [pal[Math.floor(r() * pal.length)], pal[Math.floor(r() * pal.length)]] });
   });
   const ex = th.extras || {};
   buildingExtras(buildings, th, r, distractors);
@@ -343,6 +347,7 @@ function build(seed, duelCfg, D, themeId, extra) {
     mate,
     trail: [], // 换位型路过的窗帘
     covers: [], // 挡视线的东西（火车、蒸汽、烟……），duel.js 每帧更新
+    ground: GROUND,
     image: art ? art.img : null,
   };
 }
@@ -1472,6 +1477,7 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
   }
 
   sc.props.forEach((p) => drawProp(ctx, p, ox, oy, sc.night, th.win));
+  if (sc.people) people.drawWin(ctx, sc, ox, oy, t, slotPath, th.win); // 0.8：有颜色的人
 
   // 人影：狙击手、路人、头盔假人，都是一样颜色的剪影
   const drop = opt.enemyDrop || 0;
@@ -1600,6 +1606,7 @@ function draw(ctx, sc, cam, cx, cy, D, opt) {
   // 地面
   ctx.fillStyle = th.ground;
   ctx.fillRect(cx - D / 2, oy + GROUND, D, D);
+  if (sc.people) people.drawStreet(ctx, sc, ox, oy, t);
 
   // 掩护队友：街上的箱子掩体和跑过去的队友
   if (sc.mate) {

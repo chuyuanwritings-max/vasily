@@ -57,13 +57,22 @@ const RANKS = [
   { name: '职业', stars: 22 },
 ];
 
-const ADD = ['hitRadiusAdd', 'holdMaxAdd', 'quickDrawAdd', 'rescueAdd', 'helmets'];
+// 0.8：升级枪（照《Sniper 3D》：金币买枪、升级枪）。每项 0~5 级
+const GUN_STATS = [
+  { id: 'zoom', name: '瞄准镜', desc: (lv) => '判定圈大 ' + (lv * 0.6).toFixed(1) + ' 点', mods: (lv) => ({ hitRadiusAdd: 0.6 * lv }) },
+  { id: 'steady', name: '枪托', desc: (lv) => '稳得快 ' + lv * 7 + '%、多撑 ' + (lv * 0.3).toFixed(1) + ' 秒', mods: (lv) => ({ settleMul: 1 - 0.07 * lv, holdMaxAdd: 0.3 * lv }) },
+  { id: 'clip', name: '弹匣', desc: (lv) => '每关多 ' + Math.floor((lv + 1) / 2) + ' 发', mods: (lv) => ({ clipAdd: Math.floor((lv + 1) / 2) }) },
+  { id: 'reload', name: '枪栓', desc: (lv) => '换弹快 ' + lv * 10 + '%', mods: (lv) => ({ reloadMul: 1 - 0.1 * lv }) },
+];
+const GUN_MAX = 5;
+
+const ADD = ['hitRadiusAdd', 'holdMaxAdd', 'quickDrawAdd', 'rescueAdd', 'helmets', 'clipAdd'];
 const MUL = ['settleMul', 'heartMul', 'enemyRateMul', 'reloadMul'];
 
 function fresh() {
   const team = {};
   TEAMMATES.forEach((m) => (team[m.id] = 1));
-  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0, stars: {}, cleared: [], taught: [], arenaBest: 0, daily: {} };
+  return { money: 0, fans: 0, cups: 0, revealed: false, team, base: 0, stars: {}, cleared: [], taught: [], arenaBest: 0, daily: {}, gun: { zoom: 0, steady: 0, clip: 0, reload: 0 } };
 }
 
 let S = Object.assign(fresh(), platform.load(SAVE_KEY) || {});
@@ -72,6 +81,7 @@ if (!S.cleared) S.cleared = [];
 if (!S.taught) S.taught = [];
 if (!S.arenaBest) S.arenaBest = 0;
 if (!S.daily) S.daily = {};
+if (!S.gun) S.gun = { zoom: 0, steady: 0, clip: 0, reload: 0 };
 
 function save() {
   platform.save(SAVE_KEY, S);
@@ -83,7 +93,7 @@ function reset() {
 }
 
 function combine(list) {
-  const out = { hitRadiusAdd: 0, holdMaxAdd: 0, quickDrawAdd: 0, rescueAdd: 0, helmets: 0, settleMul: 1, heartMul: 1, enemyRateMul: 1, reloadMul: 1, peekCue: false, silent: false };
+  const out = { hitRadiusAdd: 0, holdMaxAdd: 0, quickDrawAdd: 0, rescueAdd: 0, helmets: 0, clipAdd: 0, settleMul: 1, heartMul: 1, enemyRateMul: 1, reloadMul: 1, peekCue: false, silent: false };
   list.forEach((m) => {
     ADD.forEach((k) => m[k] && (out[k] += m[k]));
     MUL.forEach((k) => m[k] !== undefined && (out[k] *= m[k]));
@@ -102,6 +112,26 @@ function mods(cardIds) {
     if (c) list.push(c.mods);
   });
   return combine(list);
+}
+
+// 目标关用的加成：升级过的枪（队友揭晓以后也算上队友）
+function gunMods() {
+  const list = GUN_STATS.map((g) => g.mods(S.gun[g.id] || 0));
+  if (S.revealed) TEAMMATES.forEach((m) => list.push(m.mods(S.team[m.id] || 0)));
+  return combine(list);
+}
+function gunCost(lv) {
+  return 60 * (lv + 1);
+}
+function upgradeGun(id) {
+  const lv = S.gun[id] || 0;
+  if (lv >= GUN_MAX) return false;
+  const cost = gunCost(lv);
+  if (S.money < cost) return false;
+  S.money -= cost;
+  S.gun[id] = lv + 1;
+  save();
+  return true;
 }
 
 // 练一级要花多少奖金。lv：现在几级（1~4），返回升到下一级的价钱。
@@ -216,4 +246,5 @@ module.exports = {
   state: () => S,
   save, reset, mods, trainCost, train, upgradeBase, earn, reveal, drawCards,
   recordLevel, totalStars, rank, unlockedCards, RANKS, taught, markTaught, recordArena, recordDaily,
+  GUN_STATS, GUN_MAX, gunMods, gunCost, upgradeGun,
 };

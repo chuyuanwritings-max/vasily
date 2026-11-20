@@ -13,6 +13,8 @@ const themes = require('./themes.js');
 const team = require('./team.js');
 const cut = require('./cutscene.js');
 const { createDuel } = require('./duel.js');
+const { createMission, briefText } = require('./mission.js');
+const people = require('./people.js');
 const classic = require('./classic.js');
 const { clamp, lerp, easeOut, roundRect, comicText, starburst, rng } = require('./util.js');
 
@@ -31,6 +33,10 @@ const btnY = Math.max(panelR.y + panelR.h + 56, Math.min(L.H - 70, scopeC.y + D 
 const eyeBtn = { x: L.W * 0.24, y: btnY, r: 38 };
 const trigBtn = { x: L.W * 0.73, y: btnY, r: 50 };
 const LV = require('./levels.js');
+// 0.8 全景：整张场景缩小放在镜子的位置，点一下 = 放大到那里
+const WIDE = { x: 0, w: L.W, h: (L.W * 600) / 860 };
+WIDE.y = scopeC.y - WIDE.h / 2;
+const zoomBtn = { x: scopeC.x + D / 2 - 26, y: scopeC.y + D / 2 - 18, r: 24 };
 
 const G = {
   mode: 'title',
@@ -66,7 +72,7 @@ const G = {
   title: null, // 开场背景
 };
 
-const FAIL_TEXT = { dead: '他先开枪了', timeout: '时间到了', dry: '子弹打光了', mateDown: '小雨被打中了' };
+const FAIL_TEXT = { dead: '他先开枪了', timeout: '时间到了', dry: '子弹打光了', mateDown: '小雨被打中了', escaped: '目标跑了', boom: '炸弹炸了' };
 
 function setMode(m) {
   G.mode = m;
@@ -92,7 +98,7 @@ function sfxEvery(name, gap, vol) {
 
 function levelUnlocked(lv) {
   const S = team.state();
-  if (lv.index === 0) return true;
+  if (lv.legacy || lv.index === 0) return true;
   const prev = LV.LEVELS[lv.index - 1];
   if (S.cleared.indexOf(prev.id) < 0) return false;
   if (lv.needStars && team.totalStars() < lv.needStars) return false;
@@ -100,6 +106,12 @@ function levelUnlocked(lv) {
 }
 
 function startRound() {
+  const R = G.level.rounds[G.roundIdx];
+  G.zoom = false; // 目标关先看全景
+  if (R.mission) {
+    G.duel = createMission({ seed: G.seedBase + G.roundIdx * 37 + G.attempt * 7919, config, scopeD: D, round: R, levelIndex: G.level.index, mods: G.mods });
+    return;
+  }
   G.duel = createDuel({
     seed: G.seedBase + G.roundIdx * 37 + (G.daily ? 0 : G.attempt * 7919), // 每日挑战重来还是同一局
     config,
@@ -116,6 +128,12 @@ function openLevel(lv) {
     return;
   }
   G.level = lv;
+  if (lv.city) {
+    // 第一座城：不带卡，直接开打（枪的升级在地图页）
+    G.pickCard = null;
+    startLevel();
+    return;
+  }
   const cards = team.unlockedCards();
   if (!G.pickCard || !cards.some((c) => c.id === G.pickCard)) G.pickCard = cards.length ? cards[0].id : null;
   setMode('loadout');
@@ -124,20 +142,21 @@ function openLevel(lv) {
 function startLevel() {
   G.arena = null;
   G.daily = null;
-  G.card = G.pickCard;
-  G.mods = team.mods(G.card ? [G.card] : []);
+  G.card = G.level.city ? null : G.pickCard;
+  G.mods = G.level.city ? team.gunMods() : team.mods(G.card ? [G.card] : []);
   G.rescuesLeft = config.rescuesPerLevel + G.mods.rescueAdd;
   G.ammoAdsLeft = config.ammoAdsPerLevel;
   G.seedBase = Math.floor(Math.random() * 100000); // 以后每日挑战改成固定 seed
   G.roundIdx = 0;
   G.attempt = 0;
   G.results = [];
-  G.stats = { wasted: 0, locked: false, rescued: 0, sec: 0 };
+  G.stats = { wasted: 0, locked: false, rescued: 0, sec: 0, heads: 0, wrong: 0 };
   startRound();
   const S = team.state();
+  const mission = !!G.level.rounds[0].mission;
   if (G.level.boss && S.cleared.indexOf(G.level.id) < 0) setMode('bossIntro');
-  else if (!team.taught(G.level.id)) setMode('teach');
-  else setMode('intro');
+  else if (G.level.teach && !team.taught(G.level.id)) setMode('teach');
+  else setMode(mission ? 'brief' : 'intro');
 }
 
 // 输了点一下：直接回到这个回合开打（不放说明页、不放回合卡）
@@ -244,7 +263,7 @@ function inCircle(b, x, y) {
   return Math.hypot(x - b.x, y - b.y) <= b.r + 8;
 }
 
-const TAP_TO_SKIP = { arenaNext: 0.5, bossIntro: 0.5, teach: 0.6, intro: 0.3, reveal: 1.0, move: 0.6, hit: 0.5, ammoGift: 0.4 };
+const TAP_TO_SKIP = { arenaNext: 0.5, bossIntro: 0.5, teach: 0.6, intro: 0.3, brief: 0.5, reveal: 1.0, move: 0.6, hit: 0.5, ammoGift: 0.4 };
 
 // 下面那栋楼的小图上点了哪扇窗
 function panelCell(x, y) {
@@ -284,6 +303,36 @@ function onTouch(type, id, sx, sy) {
       return;
     }
     if (G.mode !== 'play') return;
+    if (G.duel.kind === 'mission') {
+      const d = G.duel;
+      // 全景：点一下 = 放大到那里
+      if (!G.zoom) {
+        if (y >= WIDE.y && y <= WIDE.y + WIDE.h) {
+          const k = 860 / WIDE.w;
+          d.cam.x = (x - WIDE.x) * k;
+          d.cam.y = (y - WIDE.y) * k;
+          d.pan(0, 0);
+          G.zoom = true;
+          sfx('duck', 0.3);
+          touches[id] = { role: 'ui' };
+        } else if (inCircle(trigBtn, x, y)) toast('先点全景里的一处，放大再开枪');
+        return;
+      }
+      if (inCircle(zoomBtn, x, y)) {
+        G.zoom = false;
+        d.holding = false;
+        touches[id] = { role: 'ui' };
+        return;
+      }
+      if (d.canDuck && inCircle(eyeBtn, x, y)) {
+        touches[id] = { role: 'duck' };
+        d.duckDown();
+      } else if (inCircle(trigBtn, x, y)) {
+        touches[id] = { role: 'trigger' };
+        d.triggerDown();
+      } else if (Math.hypot(x - scopeC.x, y - scopeC.y) < D / 2 + 30) touches[id] = { role: 'pan', x, y };
+      return;
+    }
     const cell = panelCell(x, y);
     if (cell) {
       touches[id] = { role: 'ui' };
@@ -330,8 +379,8 @@ function onTouch(type, id, sx, sy) {
 function skipAhead() {
   const m = G.mode;
   if (m === 'bossIntro') setMode('teach');
-  else if (m === 'teach') { team.markTaught(G.level.id); setMode('intro'); }
-  else if (m === 'intro') setMode('play');
+  else if (m === 'teach') { team.markTaught(G.level.id); setMode(G.duel.kind === 'mission' ? 'brief' : 'intro'); }
+  else if (m === 'intro' || m === 'brief') setMode('play');
   else if (m === 'move') setMode('intro');
   else if (m === 'hit') afterHit();
   else if (m === 'ammoGift') giveAmmo();
@@ -341,6 +390,8 @@ function skipAhead() {
 
 // —— 规则推进 ——
 function addStats(d) {
+  G.stats.heads += d.headshots || 0;
+  G.stats.wrong += d.wrong || 0;
   G.stats.wasted += d.wasted;
   G.stats.locked = G.stats.locked || d.lockedOnce;
   G.stats.sec += d.t;
@@ -372,15 +423,17 @@ function finishLevel() {
     noLock: !st.locked,
     noRescue: st.rescued === 0,
     fast: st.sec <= (lv.fastSec || 999),
+    head: st.heads > 0,
+    noWrong: st.wrong === 0,
   };
   const conds = lv.stars.map((k) => check[k]);
   const stars = 1 + conds.filter(Boolean).length;
   const rec = team.recordLevel(lv.id, stars);
-  const money = team.earn('perRound', lv.rounds.length) + team.earn('perStar', rec.newStars);
+  const money = team.earn('perRound', lv.rounds.length) + team.earn('perStar', rec.newStars) + team.earn('perHead', st.heads);
   const S = team.state();
   const reveal = lv.boss && !S.revealed;
   if (reveal) team.reveal();
-  G.resultInfo = { stars, conds, first: rec.first, money, sec: st.sec, reveal, cardUnlocked: rec.first ? team.unlockedCards().slice(-1)[0] : null };
+  G.resultInfo = { stars, conds, first: rec.first, money, sec: st.sec, reveal, heads: st.heads, cardUnlocked: rec.first && !lv.city ? team.unlockedCards().slice(-1)[0] : null };
   sfx('win');
   setMode('result');
 }
@@ -398,6 +451,7 @@ function fail(reason) {
 function nearMiss(reason) {
   const d = G.duel;
   if (!d) return '';
+  if (d.near) return d.near(reason);
   const head = scene.enemyHead(d.sc, 1);
   if (reason === 'mateDown') {
     const m = d.sc.mate;
@@ -448,6 +502,11 @@ function handleEvents(d) {
       G.say = { text: ev.hp === 1 ? '最后一条命！' : '还没完！', color: '#ff4d5e', t: 1.6 };
     } else if (ev.kind === 'mateSafe') { sfx('coin'); G.say = { text: '小雨安全了！', color: '#90ee90', t: 1.4 }; }
     else if (ev.kind === 'train') sfx('crawl', 0.7);
+    else if (ev.kind === 'kill') {
+      sfx(ev.head ? 'boom' : 'enemyShot', 0.7);
+      G.say = { text: (ev.head ? '爆头！' : '命中！') + (ev.left > 0 ? ' 还剩 ' + ev.left + ' 个' : ''), color: ev.head ? '#ffd23f' : '#f4f1de', t: 1.2 };
+    } else if (ev.kind === 'lampOff') { sfx('wrong', 0.5); G.say = { text: '灯灭了：他们看不见你', color: '#90ee90', t: 1.4 }; }
+    else if (ev.kind === 'drawGun') sfx('glint', 0.4);
     else if (ev.kind === 'smoke') { sfx('duck', 0.6); G.say2 = { text: '他扔了烟雾弹', t: 1.2 }; }
   }
 }
@@ -490,7 +549,8 @@ function update(dt) {
     if (G.slow > 0) { G.slow -= dt; k = 0.3; }
     d.update(dt * k);
     handleEvents(d);
-    ambientSound(d);
+    if (d.kind === 'mission') missionSound(d);
+    else ambientSound(d);
     if (d.drawLeft >= 0 && d.exposed() && Math.floor(d.t * 6) !== Math.floor((d.t - dt) * 6)) platform.vibrate(false);
     if (d.state === 'hit') { sfx('boom'); setMode('hit'); }
     else if (d.state === 'dead') {
@@ -500,6 +560,8 @@ function update(dt) {
     } else if (d.state === 'dry') fail('dry');
     else if (d.state === 'timeout') fail('timeout');
     else if (d.state === 'mateDown') fail('mateDown');
+    else if (d.state === 'escaped') fail('escaped');
+    else if (d.state === 'boom') { sfx('boom'); G.shake = 0.6; fail('boom'); }
   } else if (m === 'hit') {
     d.update(dt);
     if (G.modeT > 1.5) afterHit();
@@ -524,6 +586,13 @@ function update(dt) {
     });
     if (G.modeT >= 1.9 && G.modeT - dt < 1.9) sfx('coin');
   }
+}
+
+// 目标关的声音：心跳、倒计时滴答
+function missionSound(d) {
+  if (d.state !== 'play') return;
+  if (d.heart > 1.25) sfxEvery('heart', 0.95 / d.heart, 0.5);
+  if ((d.fuse >= 0 && d.fuse < 8) || (d.drawLeft >= 0 && d.drawLeft < 3 && d.exposed())) sfxEvery('tick', 0.5, 0.5);
 }
 
 function adDone() {
@@ -704,7 +773,7 @@ function drawHud() {
   const lv = G.level;
   text(G.arena ? '擂台 · 连胜 ' + G.arena.streak : G.daily ? '每日挑战' : '第 ' + lv.no + ' 关 · ' + lv.name, 14, 18, 12, '#f4f1de', 'left', 800);
   if (lv.rounds.length > 1) text('回合 ' + (G.roundIdx + 1) + ' / ' + lv.rounds.length, 14, 36, 11, '#c9c2e0', 'left', 700);
-  const bulletsMax = d.round.bullets || 3;
+  const bulletsMax = d.bulletsMax || d.round.bullets || 3;
   for (let i = 0; i < bulletsMax; i++) drawBullet(ctx, 18 + i * 14, lv.rounds.length > 1 ? 54 : 40, i < d.bullets);
   // Boss 的命
   if (d.bossHp > 0 && d.opp.phases) {
@@ -733,12 +802,16 @@ function drawHud() {
   if (d.coverKind()) tags.push(config.covers[d.coverKind()].name);
   if (tags.length) text(tags.join(' · '), L.W - 46, 34, 11, '#c9c2e0', 'right', 800);
 
-  if (d.drawLeft >= 0) {
-    comicText(ctx, d.exposed() ? '他瞄准你了！' : '他盯着你的窗口', scopeC.x, scopeC.y - D / 2 + 30, d.exposed() ? 26 : 18, '#ff4d5e');
+  const mission = d.kind === 'mission';
+  if (d.drawLeft >= 0 && G.mode !== 'brief') {
+    const sec = mission ? ' ' + d.drawLeft.toFixed(1) : '';
+    comicText(ctx, d.exposed() ? '他瞄准你了！' + sec : mission ? '缩着：他找不到你' : '他盯着你的窗口', scopeC.x, scopeC.y - D / 2 + 30, d.exposed() ? 24 : 18, '#ff4d5e');
   }
-  drawPanel(ctx, d);
+  if (mission) drawMissionHud(ctx, d);
+  else drawPanel(ctx, d);
 
-  // 左下：缩头按钮。点一下 = 缩一下再起来（画面会变）；按住 = 一直缩着
+  // 左下：缩头按钮。点一下 = 缩一下再起来（画面会变）；按住 = 一直缩着（目标关只有「一枪定生死」有）
+  if (!mission || d.canDuck) {
   ctx.beginPath();
   ctx.arc(eyeBtn.x, eyeBtn.y, eyeBtn.r, 0, Math.PI * 2);
   ctx.fillStyle = d.duck > 0.5 ? '#6b5a3a' : '#3a3150';
@@ -747,6 +820,7 @@ function drawHud() {
   ctx.strokeStyle = INK;
   ctx.stroke();
   drawDuckIcon(ctx, eyeBtn.x, eyeBtn.y, d.duck);
+  }
   // 右下：扳机。按住屏息，松手开枪
   const st = d.steadiness();
   ctx.beginPath();
@@ -768,10 +842,11 @@ function drawHud() {
   const beat = Math.pow(Math.max(0, Math.sin(d.t * Math.PI * 2 * (1.1 * d.heart))), 8);
   drawHeart(ctx, trigBtn.x - trigBtn.r - 6, trigBtn.y - trigBtn.r + 2, 9 + beat * 3);
 
-  if (G.level.index === 0 && G.mode === 'play') {
+  if (G.level.index === 0 && G.mode === 'play' && !mission) {
     if (d.blinks < 3) pulse(ctx, eyeBtn);
     else if (d.shots === 0 && !d.holding) pulse(ctx, trigBtn);
   }
+  if (mission && G.level.index === 0 && G.mode === 'play' && G.zoom && d.shots === 0 && !d.holding) pulse(ctx, trigBtn);
   // 第 3 关教换窗：他记住你以后，下面那栋楼一闪一闪
   if (G.mode === 'play' && d.peeks >= config.learn.warnAt && d.moving <= 0) {
     const k = (G.t * 1.4) % 1;
@@ -800,9 +875,9 @@ function drawHud() {
   }
 
   if (G.missFlash > 0 && G.lastShot) {
-    const words = { covered: '他缩着！', close: '差一点！', miss: '偏了！', decoy: '是假人！-8秒', wrong: '打错人！-8秒' };
+    const words = { covered: '他缩着！', close: '差一点！', miss: '偏了！', decoy: '是假人！-8秒', wrong: '打错人！-8秒', car: '打在车上！', lamp: '灯灭了！' };
     comicText(ctx, words[G.lastShot.kind] || '偏了！', scopeC.x, scopeC.y + D / 2 - 44, 28, G.lastShot.kind === 'close' ? '#ffd23f' : '#ff4d5e');
-    if (!d.mods.silent) comicText(ctx, '枪口火光：他看见你了', scopeC.x, scopeC.y + D / 2 - 16, 14, '#f4f1de');
+    if (!d.mods.silent && !mission) comicText(ctx, '枪口火光：他看见你了', scopeC.x, scopeC.y + D / 2 - 16, 14, '#f4f1de');
   }
   if (G.say && G.mode === 'play') comicText(ctx, G.say.text, scopeC.x, scopeC.y + 40, 22, G.say.color);
   // Boss 挨了一枪：头盔飞出去
@@ -823,6 +898,35 @@ function drawHud() {
     ctx.restore();
   }
   if (G.say2 && G.mode === 'play' && !G.missFlash) comicText(ctx, G.say2.text, scopeC.x, scopeC.y + D / 2 - 30, 18, '#ff4d5e');
+}
+
+// 目标关：镜子下面写目标那句话、还剩几个、炸弹倒计时；放大时右下角有「全景」按钮
+function drawMissionHud(ctx, d) {
+  const y = (G.zoom ? scopeC.y + D / 2 : WIDE.y + WIDE.h) + 36;
+  roundRect(ctx, 20, y, L.W - 40, 40, 10);
+  ctx.fillStyle = '#f2d8a7';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  const total = d.targets.length + (d.sc.vehicle ? 1 : 0);
+  const left = d.targetsLeft() + (d.sc.vehicle && !d.sc.vehicle.down ? 1 : 0);
+  text(briefText(d.M), L.W / 2, y + 14, 13, INK, 'center', 900);
+  const sub = [];
+  if (total > 1) sub.push('还剩 ' + left + ' / ' + total);
+  if (d.fuse >= 0) sub.push('炸弹 ' + d.fuse.toFixed(1) + ' 秒');
+  if (d.sc.lamp) sub.push(d.sc.lamp.on ? '探照灯亮着' : '灯灭了');
+  if (sub.length) text(sub.join(' · '), L.W / 2, y + 31, 11, d.fuse >= 0 && d.fuse < 8 ? '#c2263a' : '#7a4a2a', 'center', 800);
+  if (G.zoom && G.mode === 'play') {
+    ctx.beginPath();
+    ctx.arc(zoomBtn.x, zoomBtn.y, zoomBtn.r, 0, Math.PI * 2);
+    ctx.fillStyle = '#2b2438';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#f4f1de';
+    ctx.stroke();
+    text('全景', zoomBtn.x, zoomBtn.y + 1, 12, '#f4f1de', 'center', 900);
+  }
 }
 
 // 你这栋楼（从他那边看过来）：一格一扇窗，黄框是你。红圈 = 他的镜子正在看哪
@@ -1129,17 +1233,111 @@ function drawHit() {
     ctx.restore();
     const kk = easeOut(clamp((t - 0.85) / 0.2, 0, 1));
     starburst(ctx, px + 70, py + 70, 50 * kk, 32 * kk, 12, '#ff4d5e');
-    comicText(ctx, '爆头！', px + 70, py + 70, 28 * kk);
+    comicText(ctx, d.kind === 'mission' && d.lastKill && !d.lastKill.head ? '命中！' : '爆头！', px + 70, py + 70, 28 * kk);
     if (t > 1.0) comicText(ctx, '点一下继续', L.W / 2, scopeC.y + D / 2 + 26, 12, 'rgba(244,241,222,0.7)');
   }
+}
+
+// 目标关：没打倒的目标的头在哪（失败页指给你看）
+function missionTargetHead(d) {
+  const v = d.sc.vehicle;
+  if (v && !v.down) return people.vehicleHead(v);
+  const p = d.targets.find((x) => !x.down && !x.gone) || d.targets[0];
+  if (!p) return { x: d.cam.x, y: d.cam.y };
+  return people.head(p);
+}
+
+// 0.8 全景：整张场景缩小，点一下 = 放大到那里（照《Sniper 3D》：先看全景，再开镜）
+function drawWide() {
+  const ctx = P.ctx;
+  const d = G.duel;
+  const k = WIDE.w / 860;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(WIDE.x, WIDE.y, WIDE.w, WIDE.h);
+  ctx.clip();
+  ctx.translate(WIDE.x, WIDE.y);
+  ctx.scale(k, k);
+  scene.draw(ctx, d.sc, { x: 430, y: 300 }, 430, 300, 860, { t: G.t, fog: 0 });
+  ctx.restore();
+  ctx.strokeStyle = '#2b2438';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(WIDE.x, WIDE.y, WIDE.w, WIDE.h);
+  // 上一次放大的地方
+  const r = (D / 2) * k;
+  ctx.strokeStyle = 'rgba(255,210,63,0.8)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(WIDE.x + d.cam.x * k, WIDE.y + d.cam.y * k, r, 0, Math.PI * 2);
+  ctx.stroke();
+  if (G.mode === 'play') text('全景 · 点一下 = 放大到那里', L.W / 2, WIDE.y + WIDE.h + 16, 12, '#ffd23f', 'center', 800);
+}
+
+// 目标卡上的特征图标：衣服颜色块、帽子、包……
+function clueChips(ctx, clue, cx, y) {
+  const chips = [];
+  if (clue.shirt) chips.push({ color: people.SHIRTS[clue.shirt].color, label: people.SHIRTS[clue.shirt].name });
+  if (clue.hair) chips.push({ color: people.HAIRS[clue.hair].color, label: people.HAIRS[clue.hair].name });
+  if (clue.hat) chips.push({ color: '#6b4a2a', label: people.HATS[clue.hat].replace('戴', '') });
+  if (clue.bag) chips.push({ color: '#5a3a20', label: people.BAGS[clue.bag].replace(/^(背着|提着)/, '') });
+  if (clue.glasses) chips.push({ color: '#1b1530', label: '墨镜' });
+  if (clue.phone) chips.push({ color: '#dcf0ff', label: '手机' });
+  if (clue.gun) chips.push({ color: '#3a3150', label: '枪' });
+  if (clue.vest) chips.push({ color: '#b5172b', label: '炸弹包' });
+  const w = 78;
+  chips.forEach((c, i) => {
+    const x = cx + (i - (chips.length - 1) / 2) * (w + 8);
+    roundRect(ctx, x - w / 2, y, w, 30, 15);
+    ctx.fillStyle = '#f4f1de';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    ctx.fillStyle = c.color;
+    ctx.beginPath();
+    ctx.arc(x - w / 2 + 15, y + 15, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    text(c.label, x + 8, y + 16, 12, INK, 'center', 900);
+  });
+}
+
+// 开局的目标卡：一句话 + 特征图标
+function drawBrief() {
+  const ctx = P.ctx;
+  const d = G.duel;
+  const M = d.M;
+  ctx.fillStyle = 'rgba(10,6,18,0.55)';
+  ctx.fillRect(0, 0, L.W, L.H);
+  const k = easeOut(clamp(G.modeT / 0.3, 0, 1));
+  const y = lerp(-200, L.H * 0.22, k);
+  ctx.save();
+  ctx.translate(L.W / 2, y);
+  ctx.rotate(-0.03);
+  roundRect(ctx, -165, 0, 330, 170, 10);
+  ctx.fillStyle = '#f2d8a7';
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = INK;
+  ctx.stroke();
+  ctx.restore();
+  const lv = G.level;
+  text((lv.type || '') + ' · 第 ' + lv.no + ' 关 · ' + lv.name, L.W / 2, y + 24, 13, '#7a4a2a', 'center', 900);
+  const say = briefText(M);
+  const lines = say.length > 15 ? [say.slice(0, say.indexOf('：') > 0 ? say.indexOf('：') + 1 : 15), say.slice(say.indexOf('：') > 0 ? say.indexOf('：') + 1 : 15)] : [say];
+  lines.forEach((l, i) => comicText(ctx, l, L.W / 2, y + 60 + i * 30, lines.length > 1 ? 21 : 24, INK));
+  clueChips(ctx, M.clue || {}, L.W / 2, y + 120);
+  const R = d.round;
+  text(d.bullets + ' 发 · ' + R.time + ' 秒', L.W / 2, y + 190, 12, '#f4f1de', 'center', 800);
+  if (G.modeT > 0.5) text('点一下开始', L.W / 2, L.H - 60, 13, 'rgba(244,241,222,0.75)', 'center', 700);
 }
 
 // 输了：他在哪 + 回放他的红圈是怎么找到你的
 function drawFail() {
   const ctx = P.ctx;
   const d = G.duel;
-  const head = scene.enemyHead(d.sc, 1);
-  const cam = { x: clamp(head.x, D / 2, d.sc.w - D / 2), y: clamp(head.y, D / 2, d.sc.h - D / 2) };
+  const head = d.kind === 'mission' ? missionTargetHead(d) : scene.enemyHead(d.sc, 1);
+  const cam = d.kind === 'mission' ? { x: clamp(head.x, 30, d.sc.w - 30), y: clamp(head.y, 60, d.sc.h - 18) } : { x: clamp(head.x, D / 2, d.sc.w - D / 2), y: clamp(head.y, D / 2, d.sc.h - D / 2) };
   drawScope({ cam, noCross: true });
   const ex = scopeC.x + head.x - cam.x;
   const ey = scopeC.y + head.y - cam.y;
@@ -1148,10 +1346,10 @@ function drawFail() {
   ctx.beginPath();
   ctx.arc(ex, ey + 4, 22 + Math.sin(G.modeT * 6) * 3, 0, Math.PI * 2);
   ctx.stroke();
-  comicText(ctx, '他在这儿！', ex, ey - 40, 22, '#ffffff');
+  comicText(ctx, d.kind === 'mission' ? '目标在这儿！' : '他在这儿！', ex, ey - 40, 22, '#ffffff');
   comicText(ctx, FAIL_TEXT[G.failReason] || '差一点！', L.W / 2, 34, 30, '#ff4d5e');
   // 回放：红圈走过的路
-  drawPanel(ctx, d);
+  if (d.kind !== 'mission') drawPanel(ctx, d);
   const trail = d.seekTrail;
   if (trail.length > 1) {
     const p = panelR;
@@ -1189,7 +1387,7 @@ function drawTeach() {
   ctx.fillRect(0, 0, L.W, L.H);
   comicText(ctx, '第 ' + lv.no + ' 关 · ' + lv.name, L.W / 2, 70, 28);
   const lines = [];
-  if (lv.index === 0) {
+  if (lv.index === 0 && lv.legacy) {
     lines.push(['左下按住 = 缩头', '']);
     lines.push(['下面的红圈 = 他在找你', '停在你窗口上就快缩头']);
   }
@@ -1204,7 +1402,7 @@ function drawTeach() {
     ctx.restore();
   });
   const y0 = 128 + lines.length * 52 + 10;
-  text('子弹 ' + lv.rounds[0].bullets + ' 发 · 每回合 ' + lv.rounds[0].time + ' 秒' + (lv.rounds.length > 1 ? ' · ' + lv.rounds.length + ' 个回合' : ''), L.W / 2, y0, 13, '#c9c2e0', 'center', 700);
+  text('子弹 ' + (G.duel.bulletsMax || lv.rounds[0].bullets) + ' 发 · 每回合 ' + lv.rounds[0].time + ' 秒' + (lv.rounds.length > 1 ? ' · ' + lv.rounds.length + ' 个回合' : ''), L.W / 2, y0, 13, '#c9c2e0', 'center', 700);
   if (G.modeT > 0.8) text('点一下开始', L.W / 2, L.H - 60, 13, 'rgba(244,241,222,0.75)', 'center', 700);
 }
 
@@ -1279,28 +1477,32 @@ function drawMap() {
   const S = team.state();
   ctx.fillStyle = '#1a1030';
   ctx.fillRect(0, 0, L.W, L.H);
-  const ch = LV.CHAPTERS[0];
-  comicText(ctx, '第一章 · ' + ch.name, L.W / 2, 40, 26);
+  const ch = LV.CITIES[0];
+  comicText(ctx, '第一座城 · ' + ch.name, L.W / 2, 40, 24);
   const rk = team.rank();
   text('段位 ' + rk.name + ' · ★ ' + team.totalStars(), 16, 76, 13, '#ffd23f', 'left', 900);
-  text('奖金 ¥' + S.money, L.W - 16, 76, 13, '#ffd23f', 'right', 900);
+  text('金币 ¥' + S.money, L.W - 16, 76, 13, '#ffd23f', 'right', 900);
+  // 二十关排成格子：教学绿、主线蓝、特别任务红；打过的变金色
   const lvs = LV.LEVELS.filter((l) => l.chapter === ch.id);
-  const top = 120;
-  const gap = Math.min(66, (L.H - top - 110) / lvs.length);
-  const pts = lvs.map((lv, i) => ({ lv, x: L.W / 2 + (i % 2 ? 70 : -70) * (lv.boss ? 0 : 1), y: top + i * gap + 10 }));
-  ctx.strokeStyle = '#3a3150';
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-  ctx.stroke();
-  pts.forEach((p) => {
-    const lv = p.lv;
+  const cols = 4;
+  const top = 108;
+  const cellW = (L.W - 24) / cols;
+  const cellH = Math.min(84, (L.H - top - 96) / Math.ceil(lvs.length / cols));
+  const TYPE_COLOR = { 教学: '#38b000', 主线: '#3a86ff', 特别任务: '#e3263b' };
+  let lastType = '';
+  lvs.forEach((lv, i) => {
+    const x = 12 + cellW * (i % cols) + cellW / 2;
+    const y = top + cellH * Math.floor(i / cols) + 24;
     const open = levelUnlocked(lv);
     const stars = S.stars[lv.id] || 0;
-    const r = lv.boss ? 30 : 22;
+    const r = lv.boss ? 24 : 20;
+    if (lv.type !== lastType) {
+      text(lv.type, x - r - 4, y - r - 6, 10, TYPE_COLOR[lv.type], 'left', 900);
+      lastType = lv.type;
+    }
     ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = !open ? '#2b2438' : stars ? '#ffd23f' : '#e3263b';
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = !open ? '#2b2438' : stars ? '#ffd23f' : TYPE_COLOR[lv.type] || '#e3263b';
     ctx.fill();
     ctx.lineWidth = 3;
     ctx.strokeStyle = INK;
@@ -1309,20 +1511,51 @@ function drawMap() {
       const k = (G.t * 1.2) % 1;
       ctx.strokeStyle = 'rgba(255,210,63,' + (1 - k).toFixed(2) + ')';
       ctx.beginPath();
-      ctx.arc(p.x, p.y, r + 4 + k * 12, 0, Math.PI * 2);
+      ctx.arc(x, y, r + 4 + k * 10, 0, Math.PI * 2);
       ctx.stroke();
     }
-    text(open ? (lv.boss ? '王' : String(lv.no)) : '🔒', p.x, p.y + 1, lv.boss ? 20 : 16, open && stars ? INK : '#f4f1de', 'center', 900);
-    const side = p.x < L.W / 2 ? 1 : -1;
-    const tx = lv.boss ? p.x : p.x + side * (r + 10);
-    const ty = lv.boss ? p.y + r + 14 : p.y - 6;
-    text(lv.name, tx, ty, 13, open ? '#f4f1de' : '#6d6380', lv.boss ? 'center' : side > 0 ? 'left' : 'right', 800);
-    const starStr = '★★★'.slice(0, stars) + '☆☆☆'.slice(0, 3 - stars);
-    text(lv.boss && !open ? '要 ' + lv.needStars + ' 颗星' : starStr, tx, ty + (lv.boss ? 16 : 17), 12, '#ffd23f', lv.boss ? 'center' : side > 0 ? 'left' : 'right', 800);
-    G.buttons.push({ id: 'lv_' + lv.id, x: p.x - r, y: p.y - r, w: r * 2, h: r * 2, fn: () => openLevel(lv) });
+    text(open ? (lv.boss ? '王' : String(lv.no)) : '🔒', x, y + 1, 15, open && stars ? INK : '#f4f1de', 'center', 900);
+    text(lv.name, x, y + r + 11, 11, open ? '#f4f1de' : '#6d6380', 'center', 800);
+    text('★★★'.slice(0, stars) + '☆☆☆'.slice(0, 3 - stars), x, y + r + 25, 10, '#ffd23f', 'center', 800);
+    G.buttons.push({ id: 'lv_' + lv.id, x: x - r, y: y - r, w: r * 2, h: r * 2, fn: () => openLevel(lv) });
   });
-  button('mapHome', '主页', 16, L.H - 62, 100, 42, goTitle);
-  if (S.revealed) button('mapTeam', '战队', L.W - 116, L.H - 62, 100, 42, () => setMode('team'));
+  button('mapHome', '主页', 12, L.H - 60, 104, 42, goTitle);
+  button('mapGun', '升级枪', L.W / 2 - 52, L.H - 60, 104, 42, () => setMode('gun'), true);
+  if (S.revealed) button('mapTeam', '战队', L.W - 116, L.H - 60, 104, 42, () => setMode('team'));
+}
+
+// —— 0.8 升级枪（照《Sniper 3D》：金币升级瞄准镜、枪托、弹匣、枪栓） ——
+function drawGun() {
+  const ctx = P.ctx;
+  const S = team.state();
+  ctx.fillStyle = '#1a1030';
+  ctx.fillRect(0, 0, L.W, L.H);
+  comicText(ctx, '升级枪', L.W / 2, 44, 30);
+  text('金币 ¥' + S.money, L.W / 2, 80, 15, '#ffd23f', 'center', 900);
+  team.GUN_STATS.forEach((g, i) => {
+    const lv = S.gun[g.id] || 0;
+    const y = 112 + i * 96;
+    roundRect(ctx, 16, y, L.W - 32, 84, 10);
+    ctx.fillStyle = '#2b2438';
+    ctx.fill();
+    text(g.name, 32, y + 22, 17, '#f4f1de', 'left', 900);
+    for (let k = 0; k < team.GUN_MAX; k++) {
+      ctx.beginPath();
+      ctx.arc(110 + k * 18, y + 22, 6, 0, Math.PI * 2);
+      ctx.fillStyle = k < lv ? '#ffd23f' : '#4a4060';
+      ctx.fill();
+    }
+    text(lv ? '现在：' + g.desc(lv) : '还没升级', 32, y + 48, 12, '#c9c2e0', 'left', 700);
+    if (lv < team.GUN_MAX) {
+      text('下一级：' + g.desc(lv + 1), 32, y + 66, 12, '#90ee90', 'left', 700);
+      const cost = team.gunCost(lv);
+      button('gun_' + g.id, '¥' + cost, L.W - 124, y + 22, 96, 40, () => {
+        if (team.upgradeGun(g.id)) sfx('coin');
+        else toast('金币不够：多打几关，爆头多给');
+      }, S.money >= cost, S.money < cost);
+    } else text('满级', L.W - 76, y + 42, 14, '#ffd23f', 'center', 900);
+  });
+  button('gunBack', '回地图', L.W / 2 - 60, L.H - 70, 120, 44, goMap);
 }
 
 // —— 关前：看目标、带一张卡 ——
@@ -1388,7 +1621,7 @@ function drawResult() {
   const t = G.modeT;
   ctx.fillStyle = '#1a1030';
   ctx.fillRect(0, 0, L.W, L.H);
-  comicText(ctx, lv.boss ? '打败了' + config.opponents.boss.name + '！' : '过关！', L.W / 2, 70, 38);
+  comicText(ctx, lv.boss ? (lv.city ? '五个狙击手全倒了！' : '打败了' + config.opponents.boss.name + '！') : '过关！', L.W / 2, lv.boss && lv.city ? 66 : 70, lv.boss && lv.city ? 30 : 38);
   text('第 ' + lv.no + ' 关 · ' + lv.name + ' · 用时 ' + Math.round(R.sec) + ' 秒', L.W / 2, 112, 13, '#c9c2e0', 'center', 700);
   // 三颗星
   for (let i = 0; i < 3; i++) {
@@ -1422,6 +1655,7 @@ function drawResult() {
     }
   }
   comicText(ctx, '+¥' + R.money, L.W / 2, 370, 26, '#90ee90');
+  if (R.heads) text('其中爆头 ' + R.heads + ' 次 · 每次多给 ¥' + config.money.perHead, L.W / 2, 396, 12, '#ffd23f', 'center', 800);
   text('奖金 ¥' + (t < 2.4 ? S.money - R.money : S.money), L.W - 16, 40, 14, '#ffd23f', 'right', 900);
   text('段位 ' + team.rank().name, 16, 40, 14, '#ffd23f', 'left', 900);
   if (R.cardUnlocked && t > 2.2) text('解锁新卡：' + R.cardUnlocked.name + '（' + R.cardUnlocked.desc + '）', L.W / 2, 410, 13, '#3ef0ff', 'center', 800);
@@ -1430,7 +1664,7 @@ function drawResult() {
     button('continue', '继续', L.W / 2 - 100, L.H - 90, 200, 56, () => setMode('reveal'), true);
     return;
   }
-  const next = LV.LEVELS[lv.index + 1];
+  const next = (lv.legacy ? LV.CAFE : LV.LEVELS)[lv.index + 1];
   if (next && levelUnlocked(next)) button('next', '下一关', L.W / 2 + 10, L.H - 140, 150, 54, () => openLevel(next), true);
   button('again', '再打一次', next && levelUnlocked(next) ? L.W / 2 - 160 : L.W / 2 - 75, L.H - 140, 150, 54, () => openLevel(lv), !(next && levelUnlocked(next)));
   button('resMap', '回地图', L.W / 2 - 60, L.H - 72, 120, 44, goMap);
@@ -1628,10 +1862,16 @@ function render() {
     if (left < 0.4) cut.iris(ctx, L, scopeC.x, scopeC.y, lerp(D / 2, L.H, left / 0.4));
   } else if (m === 'hit') drawHit();
   else if (m === 'fail') drawFail();
-  else drawScope({});
+  else if (m === 'gun') drawGun();
+  else if (G.duel && G.duel.kind === 'mission' && (!G.zoom || m === 'brief' || m === 'teach')) {
+    ctx.fillStyle = '#120c1c';
+    ctx.fillRect(0, 0, L.W, L.H);
+    drawWide();
+  } else drawScope({});
 
-  if (m === 'play' || m === 'hit' || m === 'intro' || m === 'teach' || m === 'ammoGift') drawHud();
+  if (m === 'play' || m === 'hit' || m === 'intro' || m === 'teach' || m === 'ammoGift' || m === 'brief') drawHud();
   if (m === 'teach') drawTeach();
+  if (m === 'brief') drawBrief();
 
   if (m === 'intro') {
     const R = G.duel.round;

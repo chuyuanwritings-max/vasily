@@ -2,7 +2,7 @@
 // 单位：时间是秒（blinkMs 是毫秒），距离是屏幕上的点（375 宽的手机上量）。
 
 const config = {
-  version: '瓦西里 · 原型 0.7',
+  version: '瓦西里 · 原型 0.8',
 
   // 激励视频广告位 id。空着 = 放「广告占位」倒计时；上线前填后台建的 id。
   rewardedAdUnitId: '',
@@ -88,7 +88,7 @@ const config = {
   escort: { runSec: 2.2, hideSec: [2, 3.2], lockSec: 2.4, speed: 60 },
 
   // —— 局外：奖金 ——
-  money: { perRound: 20, perStar: 10 },
+  money: { perRound: 20, perStar: 10, perHead: 15 }, // perHead：爆头另外多给（照《Sniper 3D》）
 };
 
 module.exports = config;

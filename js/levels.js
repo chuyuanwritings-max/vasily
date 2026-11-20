@@ -7,13 +7,16 @@
 //   noMiss 一发没浪费；noLock 没被他瞄准过；noRescue 没叫队友拉人；fast 总用时 ≤ fastSec 秒
 
 const STAR_TEXT = {
+  head: '至少一次爆头',
+  noWrong: '一个都没打错',
   noMiss: '一发子弹都没浪费',
   noLock: '一次都没被他瞄准',
   noRescue: '没叫队友拉人',
   fast: (lv) => lv.fastSec + ' 秒内过关',
 };
 
-const CHAPTERS = [
+// 0.7 的网吧赛九关：0.8 换成「第一座城」，这些先留着（对狙的规则测试还在用，第二章可能拿回来）
+const CAFE_CHAPTERS = [
   {
     id: 'cafe',
     name: '网吧赛',
@@ -92,6 +95,64 @@ const CHAPTERS = [
   },
 ];
 
+
+// —— 0.8：照《Sniper 3D》的第一座城（拆解见 对狙/模仿_Sniper3D_关卡拆解.md） ——
+// 一关 = 开局一句话（目标卡）+ 找到他、开枪。mission 字段见 mission.js
+// type：教学 / 主线 / 特别任务。特别任务按顺序打完开下一座城；第三、第五个是对狙（缩头、红圈都在）
+const D = 'desert';
+const m = (kind, o) => Object.assign({ kind }, o);
+const r1 = (mission, o) => Object.assign({ theme: D, bullets: 3, time: 60, hitR: 7, props: 8, mission }, o || {});
+const CITIES = [
+  {
+    id: 'desert',
+    name: '沙漠土楼镇',
+    levels: [
+      { id: 'd1', type: '教学', name: '红衣服', stars: ['head', 'noWrong'], teach: [['点一下全景 = 放大到那里', '按住右下稳住，松手开枪']],
+        rounds: [r1(m('one', { clue: { shirt: 'red' }, say: '对手穿红衣服', win: 2, street: 2 }), { hitR: 8, time: 75 })] },
+      { id: 'd2', type: '教学', name: '碰头', stars: ['head', 'noWrong'],
+        rounds: [r1(m('one', { clue: { shirt: 'blue' }, say: '对手穿蓝衣服', win: 4, street: 4 }), { hitR: 7.5 })] },
+      { id: 'd3', type: '教学', name: '别让他跑', stars: ['head', 'noWrong'], teach: [['他会跑：跑出画面就输', '']],
+        rounds: [r1(m('runner', { clue: { bag: 'duffel' }, say: '他背着行李袋，要跑了', where: 'street', win: 2, street: 6, runAt: 6, runSpeed: 55 }))] },
+      { id: 'd4', type: '主线', name: '背包客', stars: ['head', 'noWrong'],
+        rounds: [r1(m('one', { clue: { bag: 'backpack' }, say: '对手背着背包', win: 5, street: 5 }))] },
+      { id: 'd5', type: '主线', name: '楼上的枪', stars: ['head', 'noWrong'], teach: [['他已经在瞄你：只有一发', '按住左下 = 缩头，他会慢慢丢了你']],
+        rounds: [r1(m('duel1', { clue: { gun: true }, say: '楼上有人拿枪瞄着你：一枪解决他', where: 'win', win: 7, street: 3, aimSec: 7 }), { bullets: 1, time: 45 })] },
+      { id: 'd6', type: '主线', name: '通缉', stars: ['head', 'noWrong'], teach: [['两个特征都对上才是他', '']],
+        rounds: [r1(m('one', { clue: { hair: 'red', bag: 'suitcase' }, say: '通缉：红头发，提着手提箱', half: 3, win: 3, street: 8 }))] },
+      { id: 'd7', type: '主线', name: '宽檐帽', stars: ['head', 'noWrong'],
+        rounds: [r1(m('one', { clue: { hat: 'hat' }, say: '对手戴宽檐帽', win: 6, street: 5 }), { hitR: 6.5 })] },
+      { id: 'd8', type: '主线', name: '越狱', stars: ['head', 'fast'], fastSec: 40, teach: [['限时：打掉所有穿橙衣服的', '']],
+        rounds: [r1(m('multi', { clue: { shirt: 'orange' }, say: '穿橙衣服的全是逃犯：打掉 5 个', targets: 5, win: 7, street: 7 }), { bullets: 8, time: 60, hitR: 7 })] },
+      { id: 'd9', type: '主线', name: '打电话', stars: ['head', 'noWrong'],
+        rounds: [r1(m('one', { clue: { phone: true }, say: '对手正在打电话：看手机屏幕的光', win: 7, street: 5 }), { hitR: 6.5 })] },
+      { id: 'd10', type: '主线', name: '墨镜', stars: ['head', 'noWrong'],
+        rounds: [r1(m('one', { clue: { glasses: true, shirt: 'black' }, say: '戴墨镜、穿黑衣服', half: 4, win: 6, street: 6 }), { hitR: 6.5 })] },
+      { id: 'd11', type: '主线', name: '炸弹包', stars: ['head', 'fast'], fastSec: 15, teach: [['倒计时到零，炸弹就炸', '']],
+        rounds: [r1(m('bomber', { clue: { vest: true }, say: '有人背着炸弹包：25 秒内打中他', win: 7, street: 6, fuse: 25 }), { time: 60, hitR: 6.5 })] },
+      { id: 'd12', type: '主线', name: '掏枪', stars: ['head', 'noWrong'], teach: [['他长得跟路人一样，只有掏枪那两秒露馅', '']],
+        rounds: [r1(m('assassin', { clue: {}, say: '有人装成路人，会突然掏枪', win: 7, street: 6 }), { time: 70, hitR: 6.5 })] },
+      { id: 'd13', type: '主线', name: '快跑', stars: ['head', 'noWrong'],
+        rounds: [r1(m('runner', { clue: { bag: 'suitcase', shirt: 'white' }, say: '穿白衣服、提手提箱的要跑了', half: 3, where: 'street', win: 4, street: 8, runAt: 4, runSpeed: 85 }), { hitR: 6.5 })] },
+      { id: 'd14', type: '主线', name: '三把枪', stars: ['head', 'fast'], fastSec: 30,
+        rounds: [r1(m('multi', { clue: { gun: true }, say: '打掉三个拿枪的', targets: 3, win: 8, street: 6 }), { bullets: 5, time: 45, hitR: 6.5 })] },
+      { id: 'd15', type: '主线', name: '一枪定生死', stars: ['head', 'noWrong'],
+        rounds: [r1(m('duel1', { clue: { gun: true }, say: '他已经瞄准你了：只有一发', where: 'win', win: 9, street: 5, aimSec: 4.5 }), { bullets: 1, time: 40, hitR: 6 })] },
+      // 特别任务：规则最花，按顺序打完开下一座城
+      { id: 's1', type: '特别任务', name: '追车', stars: ['head', 'noWrong'], teach: [['打驾驶室里的司机', '车开出画面就跑了']],
+        rounds: [r1(m('car', { clue: {}, targets: 0, say: '他抢了一辆黄色三轮车：打司机', win: 5, street: 4, carSpeed: 40 }), { time: 40 })] },
+      { id: 's2', type: '特别任务', name: '暗处交易', stars: ['head', 'noWrong'],
+        rounds: [r1(m('dark', { clue: {}, targets: 2, say: '两个人在暗处交易：看打火机的光', where: 'win', win: 9, street: 0 }), { bullets: 4, time: 70, hitR: 6.5 })] },
+      { id: 's3', type: '特别任务', name: '掩护小雨', stars: ['noLock', 'noRescue'], teach: [['掩护街上的小雨', '他瞄小雨时没在看你']],
+        rounds: [{ opp: 'nervous', theme: D, figures: 6, goal: 'escort', bullets: 3, time: 90, hitR: 6, props: 10 }] },
+      { id: 's4', type: '特别任务', name: '先打灯', stars: ['head', 'noWrong'], teach: [['灯亮着打倒一个，其他人就跑', '先打灭探照灯']],
+        rounds: [r1(m('light', { clue: { gun: true }, say: '先打灭探照灯，再打掉四个拿枪的', targets: 4, win: 7, street: 4 }), { bullets: 7, time: 70, hitR: 6.5 })] },
+      { id: 's5', type: '特别任务', name: '五个狙击手', boss: true, stars: ['noRescue', 'noLock'], bossIntro: ['城里藏了五个狙击手', '一个一个找出来'],
+        teach: [['缩头、看红圈：谁先暴露谁死', '']],
+        rounds: ['patient', 'nervous', 'sly', 'mover', 'patient'].map((opp, i) => ({ opp, theme: D, figures: 4 + Math.min(2, i), goal: 'kill', bullets: 3, time: 50, hitR: 6, props: 8 })) },
+    ],
+  },
+];
+
 // —— 擂台：一个接一个打，每赢一个叠一个加难 ——
 const ARENA_MODS = [
   { id: 'crowd', name: '人更多', f: (R) => { R.figures += 2; R.props += 4; } },
@@ -136,17 +197,19 @@ function dailyRounds(day, rngFn) {
   }));
 }
 
-function allLevels() {
+function allLevels(list, extra) {
   const out = [];
-  CHAPTERS.forEach((ch) => ch.levels.forEach((lv, i) => out.push(Object.assign({ chapter: ch.id, index: out.length, no: i + 1 }, lv))));
+  list.forEach((ch) => ch.levels.forEach((lv, i) => out.push(Object.assign({ chapter: ch.id, index: out.length, no: i + 1 }, extra || {}, lv))));
   return out;
 }
 
-const LEVELS = allLevels();
+const LEVELS = allLevels(CITIES, { city: true }); // 主线：一座城一座城打
+const CAFE = allLevels(CAFE_CHAPTERS, { legacy: true }); // 0.7 的网吧赛（不在地图上）
+const CHAPTERS = CITIES;
 
 function starText(lv, key) {
   const t = STAR_TEXT[key];
   return typeof t === 'function' ? t(lv) : t;
 }
 
-module.exports = { CHAPTERS, LEVELS, starText, ARENA_MODS, arenaRound, pickArenaMod, dailyRounds };
+module.exports = { CHAPTERS, CITIES, LEVELS, CAFE, starText, ARENA_MODS, arenaRound, pickArenaMod, dailyRounds };
