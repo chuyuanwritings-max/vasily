@@ -271,6 +271,17 @@ const config = {
     recoverSec: 0.5, // 松手后要喘多久才能再屏息
   },
 
+  // 0.8 目标关的手感（Cc：「按住的时候能不能打中？这完全不听我的」）：不按时晃得小一点，按住 0.25 秒就稳，稳得住 4 秒
+  missionBreath: {
+    periodSec: 3.2,
+    amp: 9,
+    holdMinAmp: 0.4,
+    settleSec: 0.25,
+    holdMaxSec: 4.0,
+    tremorPerSec: 6,
+    recoverSec: 0.35,
+  },
+
   // 屏息时，准星离他的头够近，会被轻轻吸过去。按关卡序号（从 0 起）查表，查不到就是 0
   // 0.6：Cc 说瞄准太简单，全部关掉
   assist: { radius: [], perSec: 3 },
@@ -1919,7 +1930,7 @@ const CITIES = [
     id: 'desert',
     name: '沙漠土楼镇',
     levels: [
-      { id: 'd1', type: '教学', name: '红衣服', stars: ['head', 'noWrong'], teach: [['点一下全景 = 放大到那里', '按住右下稳住，松手开枪']],
+      { id: 'd1', type: '教学', name: '红衣服', stars: ['head', 'noWrong'], teach: [['点一下全景 = 放大到那里', '按住右下就稳，按着滑一点微调，松手开枪']],
         rounds: [r1(m('one', { clue: { shirt: 'red' }, say: '对手穿红衣服', win: 2, street: 2 }), { hitR: 8, time: 75 })] },
       { id: 'd2', type: '教学', name: '碰头', stars: ['head', 'noWrong'],
         rounds: [r1(m('one', { clue: { shirt: 'blue' }, say: '对手穿蓝衣服', win: 4, street: 4 }), { hitR: 7.5 })] },
@@ -2067,6 +2078,7 @@ const LV = require('./levels.js');
 const WIDE = { x: 0, w: L.W, h: (L.W * 600) / 860 };
 WIDE.y = scopeC.y - WIDE.h / 2;
 const zoomBtn = { x: scopeC.x + D / 2 - 26, y: scopeC.y + D / 2 - 18, r: 24 };
+const TRIGGER_FINE = 0.4; // 按着扳机滑动时，手指走 1 点、准星走 0.4 点
 
 const G = {
   mode: 'title',
@@ -2358,7 +2370,7 @@ function onTouch(type, id, sx, sy) {
         touches[id] = { role: 'duck' };
         d.duckDown();
       } else if (inCircle(trigBtn, x, y)) {
-        touches[id] = { role: 'trigger' };
+        touches[id] = { role: 'trigger', x, y };
         d.triggerDown();
       } else if (Math.hypot(x - scopeC.x, y - scopeC.y) < D / 2 + 30) touches[id] = { role: 'pan', x, y };
       return;
@@ -2373,7 +2385,7 @@ function onTouch(type, id, sx, sy) {
       touches[id] = { role: 'duck' };
       G.duel.duckDown();
     } else if (inCircle(trigBtn, x, y)) {
-      touches[id] = { role: 'trigger' };
+      touches[id] = { role: 'trigger', x, y };
       G.duel.triggerDown();
     } else if (Math.hypot(x - scopeC.x, y - scopeC.y) < D / 2 + 30) {
       touches[id] = { role: 'pan', x, y };
@@ -2387,6 +2399,12 @@ function onTouch(type, id, sx, sy) {
     }
     if (t && t.role === 'pan' && G.mode === 'play') {
       G.duel.pan(x - t.x, y - t.y);
+      t.x = x;
+      t.y = y;
+    }
+    // 按着扳机滑动 = 微调准星（一根手指：按住稳住、滑一点对准、松手开枪）。手指往哪滑，准星往哪走，走得比拖镜子慢
+    if (t && t.role === 'trigger' && G.mode === 'play' && G.duel.holding) {
+      G.duel.pan(-(x - t.x) * TRIGGER_FINE, -(y - t.y) * TRIGGER_FINE);
       t.x = x;
       t.y = y;
     }
@@ -3987,6 +4005,7 @@ function createMission(opts) {
   const M = R.mission;
   const mods = Object.assign({}, NO_MODS, opts.mods || {});
   const rand = rng(opts.seed ^ 0x7f4a7c15);
+  const B = cfg.missionBreath || cfg.breath; // 目标关按住就稳（比对狙好控制）
   const sc = scene.build(opts.seed, { poseShift: 2, contrast: 0.2 }, opts.scopeD, R.theme, {
     figures: 1,
     decoys: 0,
@@ -4102,7 +4121,7 @@ function createMission(opts) {
 
   // —— 呼吸和手抖：跟对狙一样 ——
   function swayAmp() {
-    const b = cfg.breath;
+    const b = B;
     const free = b.amp * d.heart;
     if (!d.holding) return free;
     const steady = b.holdMinAmp * Math.sqrt(d.heart);
@@ -4113,7 +4132,7 @@ function createMission(opts) {
     return steady + (d.holdSec - holdMax) * b.tremorPerSec;
   }
   d.steadiness = function () {
-    const b = cfg.breath;
+    const b = B;
     if (d.recoverSec > 0 && !d.holding) return 'recover';
     if (!d.holding) return 'free';
     if (d.holdSec < b.settleSec * mods.settleMul) return 'settling';
@@ -4129,7 +4148,7 @@ function createMission(opts) {
   d.triggerUp = function () {
     if (!d.holding) return null;
     d.holding = false;
-    d.recoverSec = cfg.breath.recoverSec;
+    d.recoverSec = B.recoverSec;
     return fire();
   };
 
@@ -4400,7 +4419,7 @@ function createMission(opts) {
     if (d.reloadSec > 0) d.reloadSec = Math.max(0, d.reloadSec - dt);
     if (d.recoverSec > 0 && !d.holding) d.recoverSec = Math.max(0, d.recoverSec - dt);
     if (d.holding) d.holdSec += dt;
-    d.breath += (dt * (d.holding ? 0.3 : 1) * Math.PI * 2) / cfg.breath.periodSec;
+    d.breath += (dt * (d.holding ? 0.3 : 1) * Math.PI * 2) / B.periodSec;
     const amp = swayAmp();
     const tremor = d.steadiness() === 'tremble' ? Math.sin(d.t * 37) * amp * 0.3 : 0;
     d.sway.y = amp * Math.sin(d.breath);

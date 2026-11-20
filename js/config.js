@@ -24,6 +24,17 @@ const config = {
     recoverSec: 0.5, // 松手后要喘多久才能再屏息
   },
 
+  // 0.8 目标关的手感（Cc：「按住的时候能不能打中？这完全不听我的」）：不按时晃得小一点，按住 0.25 秒就稳，稳得住 4 秒
+  missionBreath: {
+    periodSec: 3.2,
+    amp: 9,
+    holdMinAmp: 0.4,
+    settleSec: 0.25,
+    holdMaxSec: 4.0,
+    tremorPerSec: 6,
+    recoverSec: 0.35,
+  },
+
   // 屏息时，准星离他的头够近，会被轻轻吸过去。按关卡序号（从 0 起）查表，查不到就是 0
   // 0.6：Cc 说瞄准太简单，全部关掉
   assist: { radius: [], perSec: 3 },

@@ -20,6 +20,7 @@ function createMission(opts) {
   const M = R.mission;
   const mods = Object.assign({}, NO_MODS, opts.mods || {});
   const rand = rng(opts.seed ^ 0x7f4a7c15);
+  const B = cfg.missionBreath || cfg.breath; // 目标关按住就稳（比对狙好控制）
   const sc = scene.build(opts.seed, { poseShift: 2, contrast: 0.2 }, opts.scopeD, R.theme, {
     figures: 1,
     decoys: 0,
@@ -135,7 +136,7 @@ function createMission(opts) {
 
   // —— 呼吸和手抖：跟对狙一样 ——
   function swayAmp() {
-    const b = cfg.breath;
+    const b = B;
     const free = b.amp * d.heart;
     if (!d.holding) return free;
     const steady = b.holdMinAmp * Math.sqrt(d.heart);
@@ -146,7 +147,7 @@ function createMission(opts) {
     return steady + (d.holdSec - holdMax) * b.tremorPerSec;
   }
   d.steadiness = function () {
-    const b = cfg.breath;
+    const b = B;
     if (d.recoverSec > 0 && !d.holding) return 'recover';
     if (!d.holding) return 'free';
     if (d.holdSec < b.settleSec * mods.settleMul) return 'settling';
@@ -162,7 +163,7 @@ function createMission(opts) {
   d.triggerUp = function () {
     if (!d.holding) return null;
     d.holding = false;
-    d.recoverSec = cfg.breath.recoverSec;
+    d.recoverSec = B.recoverSec;
     return fire();
   };
 
@@ -433,7 +434,7 @@ function createMission(opts) {
     if (d.reloadSec > 0) d.reloadSec = Math.max(0, d.reloadSec - dt);
     if (d.recoverSec > 0 && !d.holding) d.recoverSec = Math.max(0, d.recoverSec - dt);
     if (d.holding) d.holdSec += dt;
-    d.breath += (dt * (d.holding ? 0.3 : 1) * Math.PI * 2) / cfg.breath.periodSec;
+    d.breath += (dt * (d.holding ? 0.3 : 1) * Math.PI * 2) / B.periodSec;
     const amp = swayAmp();
     const tremor = d.steadiness() === 'tremble' ? Math.sin(d.t * 37) * amp * 0.3 : 0;
     d.sway.y = amp * Math.sin(d.breath);

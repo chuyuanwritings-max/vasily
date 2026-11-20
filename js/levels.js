@@ -107,7 +107,7 @@ const CITIES = [
     id: 'desert',
     name: '沙漠土楼镇',
     levels: [
-      { id: 'd1', type: '教学', name: '红衣服', stars: ['head', 'noWrong'], teach: [['点一下全景 = 放大到那里', '按住右下稳住，松手开枪']],
+      { id: 'd1', type: '教学', name: '红衣服', stars: ['head', 'noWrong'], teach: [['点一下全景 = 放大到那里', '按住右下就稳，按着滑一点微调，松手开枪']],
         rounds: [r1(m('one', { clue: { shirt: 'red' }, say: '对手穿红衣服', win: 2, street: 2 }), { hitR: 8, time: 75 })] },
       { id: 'd2', type: '教学', name: '碰头', stars: ['head', 'noWrong'],
         rounds: [r1(m('one', { clue: { shirt: 'blue' }, say: '对手穿蓝衣服', win: 4, street: 4 }), { hitR: 7.5 })] },

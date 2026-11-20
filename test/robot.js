@@ -79,6 +79,15 @@ const fs = require('fs');
   const zc = await g(() => ({ z: __vasily.G.zoom, x: __vasily.G.duel.cam.x, y: __vasily.G.duel.cam.y }));
   check(zc.z && Math.abs(zc.x - tp.x) < 6 && Math.abs(zc.y - tp.y) < 6, '点全景里的一处：镜子放大到那里');
   await snap('06_放大');
+  // 按住扳机就稳；按着滑动 = 微调准星（Cc：「按住的时候不能微调狙击镜，很不爽」）
+  const c0 = await g(() => ({ x: __vasily.G.duel.cam.x, y: __vasily.G.duel.cam.y }));
+  await page.mouse.move(...at(btn.trig)); await page.mouse.down(); await page.waitForTimeout(350);
+  const steadyAmp = await g(() => { const d = __vasily.G.duel; return { st: d.steadiness(), amp: Math.hypot(d.sway.x, d.sway.y) }; });
+  await page.mouse.move(btn.trig.x * S + 50, btn.trig.y * S - 30, { steps: 5 }); await page.waitForTimeout(100);
+  const c1 = await g(() => ({ x: __vasily.G.duel.cam.x, y: __vasily.G.duel.cam.y }));
+  await g(() => { __vasily.G.duel.holding = false; }); await page.mouse.up(); await page.waitForTimeout(100);
+  check(steadyAmp.st === 'steady' && steadyAmp.amp < 1.5, '按住扳机 0.35 秒：准星稳住（晃动 ' + steadyAmp.amp.toFixed(1) + ' 点）');
+  check(c1.x - c0.x > 12 && c0.y - c1.y > 6 && c1.x - c0.x < 30, '按着扳机往右上滑：准星往右上微调（走得比拖镜子慢）');
   // 打错人：路人吓得躲起来，扣 8 秒
   const mw = await g(() => {
     const V = __vasily; const d = V.G.duel; const c = d.sc.people.find((p) => p.role === 'civ');

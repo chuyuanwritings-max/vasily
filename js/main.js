@@ -37,6 +37,7 @@ const LV = require('./levels.js');
 const WIDE = { x: 0, w: L.W, h: (L.W * 600) / 860 };
 WIDE.y = scopeC.y - WIDE.h / 2;
 const zoomBtn = { x: scopeC.x + D / 2 - 26, y: scopeC.y + D / 2 - 18, r: 24 };
+const TRIGGER_FINE = 0.4; // 按着扳机滑动时，手指走 1 点、准星走 0.4 点
 
 const G = {
   mode: 'title',
@@ -328,7 +329,7 @@ function onTouch(type, id, sx, sy) {
         touches[id] = { role: 'duck' };
         d.duckDown();
       } else if (inCircle(trigBtn, x, y)) {
-        touches[id] = { role: 'trigger' };
+        touches[id] = { role: 'trigger', x, y };
         d.triggerDown();
       } else if (Math.hypot(x - scopeC.x, y - scopeC.y) < D / 2 + 30) touches[id] = { role: 'pan', x, y };
       return;
@@ -343,7 +344,7 @@ function onTouch(type, id, sx, sy) {
       touches[id] = { role: 'duck' };
       G.duel.duckDown();
     } else if (inCircle(trigBtn, x, y)) {
-      touches[id] = { role: 'trigger' };
+      touches[id] = { role: 'trigger', x, y };
       G.duel.triggerDown();
     } else if (Math.hypot(x - scopeC.x, y - scopeC.y) < D / 2 + 30) {
       touches[id] = { role: 'pan', x, y };
@@ -357,6 +358,12 @@ function onTouch(type, id, sx, sy) {
     }
     if (t && t.role === 'pan' && G.mode === 'play') {
       G.duel.pan(x - t.x, y - t.y);
+      t.x = x;
+      t.y = y;
+    }
+    // 按着扳机滑动 = 微调准星（一根手指：按住稳住、滑一点对准、松手开枪）。手指往哪滑，准星往哪走，走得比拖镜子慢
+    if (t && t.role === 'trigger' && G.mode === 'play' && G.duel.holding) {
+      G.duel.pan(-(x - t.x) * TRIGGER_FINE, -(y - t.y) * TRIGGER_FINE);
       t.x = x;
       t.y = y;
     }
