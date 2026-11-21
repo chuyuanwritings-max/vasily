@@ -2098,10 +2098,67 @@ function drawResult() {
 }
 
 // —— 开场 ——
+// 标题页的 Midjourney 图（Cc 2026-11-21 选的第 1 张）：载到了就整屏铺图，载不到照旧画会转的镜子
+const TITLE_ART = { image: 'art/title.jpg', glint: [0.816, 0.432] }; // glint：对面窗里镜片在图上的位置（按宽高的比例）
+let titleArt = null;
+
+function drawTitleArt(ctx, t) {
+  const img = titleArt;
+  // 铺满屏幕，多出来的两边或上下裁掉
+  const k = Math.max(L.W / img.width, L.H / img.height);
+  const w = img.width * k;
+  const h = img.height * k;
+  const x = (L.W - w) / 2;
+  const y = (L.H - h) / 2;
+  ctx.drawImage(img, x, y, w, h);
+  // 下面一截渐暗，按钮叠上去看得清
+  const g = ctx.createLinearGradient(0, L.H * 0.6, 0, L.H);
+  g.addColorStop(0, 'rgba(10,6,18,0)');
+  g.addColorStop(1, 'rgba(10,6,18,0.78)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, L.H * 0.6, L.W, L.H * 0.4);
+  // 对面窗里的镜片：每 3.2 秒闪一下
+  const ph = (t % 3.2) / 3.2;
+  const f = ph < 0.14 ? Math.sin((ph / 0.14) * Math.PI) : 0;
+  if (f <= 0) return;
+  const gx = x + w * TITLE_ART.glint[0];
+  const gy = y + h * TITLE_ART.glint[1];
+  const r = 6 + 16 * f;
+  const rg = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+  rg.addColorStop(0, 'rgba(255,255,240,' + (0.95 * f).toFixed(3) + ')');
+  rg.addColorStop(0.35, 'rgba(255,230,170,' + (0.5 * f).toFixed(3) + ')');
+  rg.addColorStop(1, 'rgba(255,200,120,0)');
+  ctx.fillStyle = rg;
+  ctx.fillRect(gx - r, gy - r, r * 2, r * 2);
+  ctx.strokeStyle = 'rgba(255,250,230,' + (0.8 * f).toFixed(3) + ')';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(gx - r * 1.4, gy);
+  ctx.lineTo(gx + r * 1.4, gy);
+  ctx.moveTo(gx, gy - r);
+  ctx.lineTo(gx, gy + r);
+  ctx.stroke();
+}
+
 function drawTitle() {
   const ctx = P.ctx;
-  const sc = G.title.sc;
   const t = G.modeT;
+  const S = team.state();
+  let by;
+  if (titleArt) {
+    drawTitleArt(ctx, t);
+    by = L.H - 216; // 按钮尽量往下，少挡狙击手
+  } else {
+    by = drawTitleScope(ctx, t);
+  }
+  cut.logo(ctx, L, t);
+  text('二战 · 狙击手对决', L.W / 2, L.H * 0.14 + 92, 14, '#f4f1de', 'center', 800);
+  titleButtons(S, by);
+}
+
+// 没有图时：镜子慢慢扫过一片城。返回按钮从哪一行开始
+function drawTitleScope(ctx, t) {
+  const sc = G.title.sc;
   const d = Math.min(L.W * 0.82, L.H * 0.42);
   const tc = { x: L.W / 2, y: L.H * 0.3 + d / 2 + 10 };
   // 镜子慢慢扫过一片城
@@ -2123,11 +2180,10 @@ function drawTitle() {
   ctx.stroke();
   ctx.restore();
   scopeRing(ctx, tc.x, tc.y, d);
-  cut.logo(ctx, L, t);
-  text('二战 · 狙击手对决', L.W / 2, L.H * 0.14 + 92, 14, '#f4f1de', 'center', 800);
+  return Math.min(L.H - 230, tc.y + d / 2 + 24);
+}
 
-  const S = team.state();
-  const by = Math.min(L.H - 230, tc.y + d / 2 + 24);
+function titleButtons(S, by) {
   button('start', '开始', L.W / 2 - 110, by, 220, 58, goMap, true);
   button('arena', '擂台 · 最好 ' + S.arenaBest, L.W / 2 - 160, by + 70, 150, 44, startArena);
   button('daily', S.daily[dayKey()] ? '每日 · ' + S.daily[dayKey()] + ' 秒' : '每日挑战', L.W / 2 + 10, by + 70, 150, 44, startDaily);
@@ -2357,6 +2413,7 @@ function frame() {
 // Midjourney 背景图：有标记的就去载图，载到了那张地图就换成图
 const bgslots = require('./bgslots.js');
 Object.keys(bgslots).forEach((id) => platform.loadImage(bgslots[id].image, (img) => scene.registerArt(id, img, bgslots[id])));
+platform.loadImage(TITLE_ART.image, (img) => { titleArt = img; });
 
 goTitle();
 platform.exposeForTest('__vasily', { startStandoff, openStandoff, squadBtns, startArena, startDaily, retryRound, G, config, scene, team, cut, LV, scopeC, D, eyeBtn, trigBtn, panelR, scale, setMode, openLevel, startLevel, startRound, afterHit, finishLevel, goMap, startClassic, levelUnlocked });

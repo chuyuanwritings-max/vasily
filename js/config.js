@@ -2,7 +2,7 @@
 // 单位：时间是秒（blinkMs 是毫秒），距离是屏幕上的点（375 宽的手机上量）。
 
 const config = {
-  version: '瓦西里 · 精简版 0.10',
+  version: '瓦西里 · 精简版 0.10.1',
 
   // 激励视频广告位 id。空着 = 放「广告占位」倒计时；上线前填后台建的 id。
   rewardedAdUnitId: '',
