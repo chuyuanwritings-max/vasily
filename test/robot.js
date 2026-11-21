@@ -48,16 +48,64 @@ const fs = require('fs');
     await tap(); await page.waitForTimeout(200);
   };
 
-  // —— 开场 → 二战样机（0.9，Cc 定：二战「狙击手对决」，先做小样机） ——
+  // —— 开场 → 精简版对决（0.10，Cc：「拼的不是耐心吗」「太复杂了」） ——
   await snap('01_开场');
   check((await mode()) === 'title', '打开先是开场界面');
   await clickBtn('start');
-  check((await mode()) === 'map', '点「开始」进二战样机的地图');
-  check((await g(() => __vasily.LV.LEVELS.length === 3 && __vasily.LV.LEVELS.every((l) => l.rounds[0].theme === 'ruins' && l.rounds[0].patrols >= 1))), '样机三关：废墟城镇，楼下都有巡逻');
+  check((await mode()) === 'map', '点「开始」进地图');
+  check((await g(() => __vasily.LV.LEVELS.length === 5 && __vasily.LV.LEVELS.every((l) => l.standoff))), '精简版五关：一关一个狙击手');
   await snap('02_地图');
-  await clickBtn('lv_w2');
+  await clickBtn('lv_q2');
   check((await g(() => __vasily.G.toast && __vasily.G.toast.text)) === '先过前一关', '第二关锁着：先过前一关');
-  await clickBtn('lv_w1');
+  await clickBtn('lv_q1');
+  check((await mode()) === 'soTeach', '第一次进来：三格图讲怎么玩（每格四个字）');
+  await page.waitForTimeout(1300); await snap('03_三格图');
+  await tap(); await page.waitForTimeout(200);
+  check((await mode()) === 'so' && (await g(() => __vasily.G.so.wide)), '开局是望远镜：看全景，局里没有字');
+  check((await g(() => __vasily.G.so.mode === 'hide' && __vasily.G.so.timer > 6)), '他一开始缩着，要等好几秒才探头（拼耐心）');
+  await snap('04_望远镜');
+  // 别处的小动静（假线索）
+  const q_amb = await g(() => { const d = __vasily.G.so; const before = d.sc.distractors.map((x) => x.state).join(''); for (let i = 0; i < 600; i++) { d.update(1 / 60); if (d.mode !== 'hide') { d.mode = 'hide'; d.timer = 9; } } return before !== d.sc.distractors.map((x) => x.state).join(''); });
+  check(q_amb, '别处的窗帘、亮灯隔几秒动一下：假线索，要看仔细');
+  // 他探头前的小动静
+  const q_tell = await g(() => { const d = __vasily.G.so; d.timer = 0.01; d.update(0.02); return d.mode === 'tell' && !!d.tellAt; });
+  check(q_tell, '他探头前，他那扇窗附近有一点小动静');
+  await page.waitForTimeout(300); await snap('05_小动静');
+  // 望远镜里点一下：换狙击镜对准那里
+  const qp = await g(() => { const d = __vasily.G.so; const h = d.head(1); const z = d.ZOOM_WIDE; return { x: __vasily.scopeC.x + (h.x - d.cam.x) * z, y: __vasily.scopeC.y + (h.y - d.cam.y) * z, hx: h.x, hy: h.y }; });
+  await page.mouse.click(qp.x * S, qp.y * S); await page.waitForTimeout(150);
+  const q_zc = await g(() => ({ wide: __vasily.G.so.wide, x: __vasily.G.so.cam.x, y: __vasily.G.so.cam.y }));
+  check(!q_zc.wide && Math.hypot(q_zc.x - qp.hx, q_zc.y - qp.hy) < 12, '望远镜里点一下：换狙击镜，对准点的地方');
+  // 开着镜子、他探着头：他的把握涨，镜片变亮
+  const q_nt = await g(() => { const d = __vasily.G.so; d.mode = 'peek'; d.timer = 9; d.sc.enemy.lift = 1; d.notice = 0; for (let i = 0; i < 90; i++) d.update(1 / 60); return { n: d.notice, g: d.glint() }; });
+  check(q_nt.n > 0.2 && q_nt.g > 0.3, '开着镜子、他探着头：他越来越清楚你在哪，镜片越来越亮');
+  await snap('06_镜片变亮');
+  // 收镜：他慢慢丢了你
+  await page.mouse.click(...at(btn.eye)); await page.waitForTimeout(100);
+  const q_fo = await g(() => { const d = __vasily.G.so; const n0 = d.notice; for (let i = 0; i < 120; i++) d.update(1 / 60); return { wide: d.wide, n0, n1: d.notice }; });
+  check(q_fo.wide && q_fo.n1 < q_fo.n0, '点左下收镜：回到望远镜，他慢慢丢了你');
+  // 打空：枪声暴露你，他换地方藏
+  const q_ms = await g(() => { const d = __vasily.G.so; d.wide = false; const w0 = d.sc.enemy.win; d.mode = 'hide'; d.timer = 9; d.sc.enemy.lift = 0; d.notice = 0; d.cam.x = 100; d.cam.y = 150; d.sway = { x: 0, y: 0 }; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 1; const r = d.triggerUp(); d.timer = 0.01; d.update(0.02); return { kind: r.kind, moved: d.sc.enemy.win !== w0, n: d.notice, b: d.bullets }; });
+  check(q_ms.kind !== 'hit' && q_ms.moved && q_ms.n >= 0.39 && q_ms.b === 2, '打空一枪：枪声暴露你，他换地方藏，而且更快找到你');
+  // 一直开着镜子不收：他开枪，输；失败页指出他在哪
+  await g(() => { const d = __vasily.G.so; d.wide = false; d.mode = 'peek'; d.timer = 99; d.sc.enemy.lift = 1; d.notice = 0.95; });
+  await page.waitForFunction(() => __vasily.G.mode === 'soFail', null, { timeout: 3000 });
+  check((await g(() => __vasily.G.failReason)) === 'dead', '镜片发白还不收镜：他先开枪，这局输');
+  await page.waitForTimeout(200); await snap('07_他先开枪');
+  await clickBtn('soRetry');
+  check((await mode()) === 'so' && (await g(() => __vasily.G.so.notice === 0 && __vasily.G.so.wide)), '点「再来」：直接重开');
+  // 他探头时打中他：赢
+  const qhit = await g(() => { const d = __vasily.G.so; d.wide = false; d.mode = 'peek'; d.timer = 9; d.sc.enemy.lift = 1; const h = d.head(1); d.cam.x = h.x; d.cam.y = h.y; d.sway = { x: 0, y: 0 }; d.reloadSec = 0; d.recoverSec = 0; d.holding = true; d.holdSec = 0.5; return d.triggerUp(); });
+  check(qhit.hit, '他探着头时对准、按住稳住、松手：打中');
+  await page.waitForTimeout(400); await snap('08_砰');
+  await page.waitForFunction(() => __vasily.G.mode === 'result', null, { timeout: 4000 });
+  await page.waitForTimeout(2400); await snap('09_过关');
+  const q_qr = await g(() => ({ r: __vasily.G.resultInfo, next: __vasily.levelUnlocked(__vasily.LV.LEVELS[1]) }));
+  check(q_qr.r.stars >= 2 && q_qr.r.conds[0] && q_qr.next, '过关：一枪就中那颗星拿到；开下一关');
+
+  // —— 0.9 二战样机（巡逻、队友；Cc 说太复杂，收起来了；规则照旧） ——
+  check(!(await g(() => __vasily.levelUnlocked(__vasily.LV.WW2_LEVELS[1]))), '样机第二关锁着：先过前一关');
+  await g(() => __vasily.openLevel(__vasily.LV.WW2_LEVELS[0]));
   await page.waitForTimeout(800);
   check((await mode()) === 'teach', '第一关不带卡，一页说明：缩头、红圈、巡逻、队友');
   await snap('03_样机说明');
@@ -100,7 +148,7 @@ const fs = require('fs');
   // 轮流模式：巡逻在楼下时对面不找你（给 Cc 对比用）
   const alt = await g(() => {
     const V = __vasily; const { createDuel } = __require('')('./js/duel.js');
-    const R = V.LV.LEVELS[0].rounds[0];
+    const R = V.LV.WW2_LEVELS[0].rounds[0];
     const mk = (a) => { const d = createDuel({ seed: 9, config: V.config, scopeD: V.D, round: R, levelIndex: 0, alternate: a }); d.patrols[0].x = 2; d.patrols[0].pause = 99; let s = 0; for (let i = 0; i < 600; i++) { d.update(1 / 60); d.duck = 1; d.duckHeld = true; if (d.searching()) s++; } return s; };
     return { same: mk(false), alt: mk(true) };
   });
@@ -110,7 +158,7 @@ const fs = require('fs');
   check(wh.hit, '打中对面的狙击手');
   await page.waitForFunction(() => __vasily.G.mode === 'result', null, { timeout: 4000 });
   await page.waitForTimeout(2400); await snap('08_样机过关');
-  check(await g(() => __vasily.levelUnlocked(__vasily.LV.LEVELS[1])), '过第一关：开第二关（两队巡逻）');
+  check(await g(() => __vasily.levelUnlocked(__vasily.LV.WW2_LEVELS[1])), '过第一关：开第二关（两队巡逻）');
 
   // —— 0.8 照《Sniper 3D》的认目标关（Cc 定收起来，不在地图上；规则照旧） ——
   const cityInfo = await g(() => { const L = __vasily.LV.CITY_LEVELS; const n = (t) => L.filter((l) => l.type === t).length; return { all: L.length, a: n('教学'), b: n('主线'), c: n('特别任务') }; });

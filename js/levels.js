@@ -7,6 +7,8 @@
 //   noMiss 一发没浪费；noLock 没被他瞄准过；noRescue 没叫队友拉人；fast 总用时 ≤ fastSec 秒
 
 const STAR_TEXT = {
+  oneShot: '一枪就中',
+  unseen: '他没发现你',
   head: '至少一次爆头',
   noWrong: '一个都没打错',
   noMiss: '一发子弹都没浪费',
@@ -175,6 +177,24 @@ const WW2 = [
   },
 ];
 
+
+// —— 0.10 精简版（Cc 2026-11-21：「太着急、太复杂」→ 照原作只做一件事，节奏放慢）——
+// 一关一个狙击手：望远镜找 → 点一下开镜 → 等他探头 → 一枪。他探头前附近有一点小动静（tell）
+// hideSec 他缩着多久；peekSec 探头多久；noticeSec 你开着镜子、他探着头，几秒他就找到你
+const STANDOFF = [
+  {
+    id: 'duel',
+    name: '狙击手对决',
+    levels: [
+      { id: 'q1', name: '废墟', stars: ['oneShot', 'unseen'], level: { theme: 'ruins', tell: 'curtain', hideSec: [8, 12], peekSec: [4, 5.5], noticeSec: 4.5, bullets: 3, hitR: 8 } },
+      { id: 'q2', name: '山城', stars: ['oneShot', 'unseen'], level: { theme: 'med', tell: 'ember', hideSec: [10, 15], peekSec: [3.5, 5], noticeSec: 4, bullets: 2, hitR: 7 } },
+      { id: 'q3', name: '雪原', stars: ['oneShot', 'unseen'], level: { theme: 'snow', tell: 'dust', hideSec: [11, 16], peekSec: [3, 4.5], noticeSec: 3.5, bullets: 2, hitR: 7 } },
+      { id: 'q4', name: '古堡夜', stars: ['oneShot', 'unseen'], level: { theme: 'castle', tell: 'ember', night: true, decoys: 1, hideSec: [12, 17], peekSec: [3, 4], noticeSec: 3.2, bullets: 2, hitR: 6.5 } },
+      { id: 'q5', name: '王牌', stars: ['oneShot', 'unseen'], level: { theme: 'ruins', tell: 'mix', decoys: 1, hideSec: [13, 19], peekSec: [2.5, 3.5], noticeSec: 3, bullets: 1, hitR: 6 } },
+    ],
+  },
+];
+
 // —— 擂台：一个接一个打，每赢一个叠一个加难 ——
 const ARENA_MODS = [
   { id: 'crowd', name: '人更多', f: (R) => { R.figures += 2; R.props += 4; } },
@@ -225,14 +245,15 @@ function allLevels(list, extra) {
   return out;
 }
 
-const LEVELS = allLevels(WW2, { ww2: true }); // 0.9 主线：二战样机
+const LEVELS = allLevels(STANDOFF, { standoff: true }); // 0.10 主线：精简版对决
+const WW2_LEVELS = allLevels(WW2, { ww2: true }); // 0.9 二战样机（巡逻、队友；Cc 说太复杂，先收起来）
 const CITY_LEVELS = allLevels(CITIES, { city: true }); // 0.8 照《Sniper 3D》的认目标关（Cc 定收起来，不在地图上）
 const CAFE = allLevels(CAFE_CHAPTERS, { legacy: true }); // 0.7 的网吧赛（不在地图上）
-const CHAPTERS = WW2;
+const CHAPTERS = STANDOFF;
 
 function starText(lv, key) {
   const t = STAR_TEXT[key];
   return typeof t === 'function' ? t(lv) : t;
 }
 
-module.exports = { CHAPTERS, CITIES, WW2, LEVELS, CITY_LEVELS, CAFE, starText, ARENA_MODS, arenaRound, pickArenaMod, dailyRounds };
+module.exports = { CHAPTERS, CITIES, WW2, STANDOFF, LEVELS, WW2_LEVELS, CITY_LEVELS, CAFE, starText, ARENA_MODS, arenaRound, pickArenaMod, dailyRounds };

@@ -2,7 +2,7 @@
 // 单位：时间是秒（blinkMs 是毫秒），距离是屏幕上的点（375 宽的手机上量）。
 
 const config = {
-  version: '瓦西里 · 二战样机 0.9',
+  version: '瓦西里 · 精简版 0.10',
 
   // 激励视频广告位 id。空着 = 放「广告占位」倒计时；上线前填后台建的 id。
   rewardedAdUnitId: '',
@@ -94,6 +94,9 @@ const config = {
     mist: { name: '水雾', period: 7, r: 120 },
     glare: { name: '玻璃反光', every: [5, 8], w: 70, speed: 300 },
   },
+
+  // 精简版对决（Cc：「拼的不是耐心吗」）：tellSec 他探头前小动静持续几秒；missNotice 打空一枪他多知道多少；forgetPerSec 收镜后他每秒忘掉多少
+  standoff: { tellSec: 1.8, missNotice: 0.4, forgetPerSec: 0.25 },
 
   // 二战样机：楼下的敌军巡逻（照《盟军敢死队》的扇形视野）
   // speed：每秒走几扇窗；coneCols：扇形左右看几扇窗；spotExposed / spotDucked：露着头 / 正下方缩着头，几秒拉满警报
