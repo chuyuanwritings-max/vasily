@@ -88,6 +88,12 @@ function createDuel(opts) {
     relocating: false,
     fog: 0,
     coverNext: 2.5, // 下一次遮挡还有几秒
+    // 二战样机：楼下的敌军巡逻（扇形视野扫到你就拉警报）和你的小队
+    patrols: [],
+    alarm: 0, // 警报（0..1），满了 = 被巡逻发现
+    squad: (R.squad || []).map((id) => ({ id, charges: cfg.squad[id].charges })),
+    decoyT: -1, // 诱饵兵举起钢盔：还有几秒他上钩开枪
+    alternateMode: opts.alternate === undefined ? !!cfg.alternate : !!opts.alternate,
     // 开枪
     heart: 1,
     holding: false,
@@ -116,6 +122,95 @@ function createDuel(opts) {
     return t;
   }
   d.tactic = tactic;
+
+  // —— 二战样机：楼下的巡逻 ——
+  // 巡逻在你这栋楼下面的街上来回走，抬头看楼上：扇形覆盖左右 coneCols 扇窗。
+  // 照《盟军敢死队》的两段视野：扇形里你露着头 → 很快被发现；缩着头只躲得过远的一段，正下方缩头也躲不过。
+  const P = cfg.patrol;
+  for (let i = 0; i < (R.patrols || 0); i++) {
+    d.patrols.push({ x: i === 0 ? -0.6 : COLS - 0.4, dir: i === 0 ? 1 : -1, pause: 0, stun: 0, active: i === 0 || false, at: i === 0 ? 0 : P.secondAt });
+  }
+  function patrolSees(pt) {
+    if (!pt.active || pt.stun > 0 || pt.x < -0.5 || pt.x > COLS - 0.5) return 0;
+    const dc = Math.abs(d.me.c - pt.x);
+    if (dc > P.coneCols) return 0;
+    const near = dc < 0.5;
+    if (d.exposed()) return 1 / P.spotExposed;
+    if (near) return 1 / P.spotDucked;
+    return 0;
+  }
+  function updatePatrols(dt) {
+    if (!d.patrols.length) return;
+    let rate = 0;
+    d.patrols.forEach((pt) => {
+      if (!pt.active) {
+        if (d.t >= pt.at) {
+          pt.active = true;
+          d.events.push({ kind: 'patrolIn' });
+        }
+        return;
+      }
+      if (pt.stun > 0) {
+        pt.stun -= dt;
+        if (pt.stun <= 0) d.events.push({ kind: 'patrolBack' });
+        return;
+      }
+      if (pt.pause > 0) pt.pause -= dt;
+      else {
+        pt.x += pt.dir * P.speed * dt;
+        if (pt.x > COLS - 0.2 || pt.x < -0.8) {
+          pt.dir *= -1;
+          pt.pause = P.pauseSec[0] + rand() * (P.pauseSec[1] - P.pauseSec[0]);
+        } else if (rand() < dt * 0.15) pt.pause = 0.6 + rand();
+      }
+      rate = Math.max(rate, patrolSees(pt));
+    });
+    if (rate > 0) d.alarm = Math.min(1, d.alarm + rate * dt);
+    else d.alarm = Math.max(0, d.alarm - dt * P.coolPerSec);
+    if (d.alarm >= 1) {
+      d.state = 'spotted';
+      d.holding = false;
+    }
+  }
+  d.patrolSees = (pt) => patrolSees(pt) > 0;
+
+  // —— 二战样机：小队（点一下放技能） ——
+  // decoy 诱饵兵：举起钢盔，他上钩朝钢盔开枪，枪口火光把他照出来
+  // beret 贝雷帽：悄悄放倒离你最近的巡逻兵，那队巡逻停下来找人
+  d.useSquad = function (id) {
+    if (d.state !== 'play') return false;
+    const m = d.squad.find((x) => x.id === id);
+    if (!m || m.charges <= 0) return false;
+    if (id === 'decoy') {
+      if (d.decoyT >= 0) return false;
+      d.decoyT = cfg.squad.decoy.baitSec;
+      // 他缩着就引他探头
+      if (d.enemy.mode === 'hide' && !d.relocating) d.enemy.timer = Math.min(d.enemy.timer, 0.3);
+    } else if (id === 'beret') {
+      const live = d.patrols.filter((pt) => pt.active && pt.stun <= 0);
+      if (!live.length) return false;
+      live.sort((a, b) => Math.abs(a.x - d.me.c) - Math.abs(b.x - d.me.c));
+      live[0].stun = cfg.squad.beret.stunSec;
+      d.alarm = Math.max(0, d.alarm - 0.5);
+    }
+    m.charges -= 1;
+    d.events.push({ kind: 'squad', id });
+    return true;
+  };
+  function updateDecoy(dt) {
+    if (d.decoyT < 0) return;
+    d.decoyT -= dt;
+    if (d.decoyT > 0) return;
+    // 他探着头才会朝钢盔开枪；还没探头就再等一会儿
+    if (d.enemy.mode === 'peek' && !d.relocating) {
+      d.decoyT = -1;
+      d.flashSec = 1.8; // 火光：他的位置亮出来，这几秒他也露着
+      d.drawLeft = -1;
+      d.lock = 0;
+      d.heat = Math.min(d.heat, 0.3);
+      d.events.push({ kind: 'decoyShot' });
+    } else if (d.decoyT < -4) d.decoyT = -1; // 他一直不出来，钢盔收回
+  }
   // 现在这一招带什么遮挡（Boss 第三招放蒸汽）
   d.coverKind = function () {
     return tactic().cover || roundCover;
@@ -194,6 +289,10 @@ function createDuel(opts) {
   // 他在找你吗：探头时才找（红圈在动）
   d.searching = function () {
     return d.state === 'play' && (d.enemy.mode === 'peek' || d.enemy.mode === 'rise') && !d.relocating;
+  };
+  // 轮流模式：有巡逻在楼下走的时候，对面不找你
+  d.patrolOnStreet = function () {
+    return d.patrols.some((pt) => pt.active && pt.stun <= 0 && pt.x > -0.5 && pt.x < COLS - 0.5);
   };
   // 他在瞄队友（掩护关）：这时候他不找你
   d.aimingMate = function () {
@@ -468,6 +567,11 @@ function createDuel(opts) {
     const e = d.enemy;
     const tc = tactic();
     const busy = d.drawLeft >= 0 || d.watch > 0 || d.flashSec > 0;
+    // 轮流模式：巡逻在楼下时他缩着等（已经瞄上你的不算）
+    if (d.alternateMode && !busy && d.patrolOnStreet()) {
+      if (e.mode === 'peek' || e.mode === 'rise') { e.mode = 'fall'; e.timer = RISE_SEC; }
+      if (e.mode === 'hide') { e.timer = Math.max(e.timer, 0.8); return; }
+    }
     if (!busy) e.timer -= dt;
     if (e.mode === 'hide' && d.relocating) {
       // 缩到窗台下了：换窗，窗帘一扇扇动
@@ -645,6 +749,8 @@ function createDuel(opts) {
     updateEnemy(dt);
     updateSeek(dt);
     updateMate(dt);
+    updatePatrols(dt);
+    updateDecoy(dt);
     if (d.state !== 'play') return;
     if (Math.floor(d.t * 5) !== Math.floor((d.t - dt) * 5)) {
       d.seekTrail.push({ x: d.seek.x, y: d.seek.y });

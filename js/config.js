@@ -2,7 +2,7 @@
 // 单位：时间是秒（blinkMs 是毫秒），距离是屏幕上的点（375 宽的手机上量）。
 
 const config = {
-  version: '瓦西里 · 原型 0.8',
+  version: '瓦西里 · 二战样机 0.9',
 
   // 激励视频广告位 id。空着 = 放「广告占位」倒计时；上线前填后台建的 id。
   rewardedAdUnitId: '',
@@ -93,6 +93,17 @@ const config = {
     sand: { name: '沙尘暴', every: [7, 11], w: 300, speed: 170 },
     mist: { name: '水雾', period: 7, r: 120 },
     glare: { name: '玻璃反光', every: [5, 8], w: 70, speed: 300 },
+  },
+
+  // 二战样机：楼下的敌军巡逻（照《盟军敢死队》的扇形视野）
+  // speed：每秒走几扇窗；coneCols：扇形左右看几扇窗；spotExposed / spotDucked：露着头 / 正下方缩着头，几秒拉满警报
+  patrol: { speed: 0.45, pauseSec: [1.5, 3], coneCols: 1.0, spotExposed: 1.2, spotDucked: 3.0, coolPerSec: 0.4, secondAt: 25 },
+  // 轮流模式（总指挥那边的建议，给 Cc 对比）：巡逻走到楼下时，对面狙击手也缩着不找你，两件事不同时压过来
+  alternate: false,
+  // 小队：每个兵种一局几次、效果多大
+  squad: {
+    decoy: { name: '诱饵兵', charges: 1, baitSec: 0.8 },
+    beret: { name: '贝雷帽', charges: 1, stunSec: 15 },
   },
 
   // 掩护队友过街

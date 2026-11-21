@@ -153,6 +153,28 @@ const CITIES = [
   },
 ];
 
+
+// —— 0.9 二战样机（Cc 2026-11-21 定：二战「狙击手对决」，先做小样机）——
+// 一张废墟城镇图；你这栋楼下有敌军巡逻（扇形视野扫到就拉警报）；带两个兵种：诱饵兵、贝雷帽
+// 设计草案：对狙/二战狙击手对决_设计草案_20261120.md
+const W = 'ruins';
+const SQ = ['decoy', 'beret'];
+const WW2 = [
+  {
+    id: 'ww2',
+    name: '废墟城镇',
+    levels: [
+      { id: 'w1', type: '样机', name: '一队巡逻', stars: ['noLock', 'noMiss'],
+        teach: [['下面是你这栋楼：巡逻在楼下走', '黄色扇形扫到你就缩头；走到你正下方，缩头也躲不过，要换窗'], ['中间两个是你的队友，点一下', '诱饵兵举钢盔骗他开枪；贝雷帽放倒一个巡逻']],
+        rounds: [{ opp: 'patient', theme: W, figures: 3, goal: 'kill', bullets: 3, time: 90, hitR: 7, props: 6, patrols: 1, squad: SQ }] },
+      { id: 'w2', type: '样机', name: '两队巡逻', stars: ['noLock', 'noMiss'],
+        rounds: [{ opp: 'nervous', theme: W, figures: 4, goal: 'kill', bullets: 3, time: 90, hitR: 6.5, props: 8, patrols: 2, squad: SQ }] },
+      { id: 'w3', type: '样机', name: '王牌', stars: ['noLock', 'noRescue'], teach: [['他也摆钢盔假人，还会扔烟雾弹', '']],
+        rounds: [{ opp: 'sly', theme: W, figures: 5, goal: 'kill', bullets: 3, time: 100, hitR: 6, props: 8, patrols: 2, squad: SQ, cover: 'auto' }] },
+    ],
+  },
+];
+
 // —— 擂台：一个接一个打，每赢一个叠一个加难 ——
 const ARENA_MODS = [
   { id: 'crowd', name: '人更多', f: (R) => { R.figures += 2; R.props += 4; } },
@@ -203,13 +225,14 @@ function allLevels(list, extra) {
   return out;
 }
 
-const LEVELS = allLevels(CITIES, { city: true }); // 主线：一座城一座城打
+const LEVELS = allLevels(WW2, { ww2: true }); // 0.9 主线：二战样机
+const CITY_LEVELS = allLevels(CITIES, { city: true }); // 0.8 照《Sniper 3D》的认目标关（Cc 定收起来，不在地图上）
 const CAFE = allLevels(CAFE_CHAPTERS, { legacy: true }); // 0.7 的网吧赛（不在地图上）
-const CHAPTERS = CITIES;
+const CHAPTERS = WW2;
 
 function starText(lv, key) {
   const t = STAR_TEXT[key];
   return typeof t === 'function' ? t(lv) : t;
 }
 
-module.exports = { CHAPTERS, CITIES, LEVELS, CAFE, starText, ARENA_MODS, arenaRound, pickArenaMod, dailyRounds };
+module.exports = { CHAPTERS, CITIES, WW2, LEVELS, CITY_LEVELS, CAFE, starText, ARENA_MODS, arenaRound, pickArenaMod, dailyRounds };

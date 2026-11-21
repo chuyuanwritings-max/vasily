@@ -37,6 +37,9 @@ const LV = require('./levels.js');
 const WIDE = { x: 0, w: L.W, h: (L.W * 600) / 860 };
 WIDE.y = scopeC.y - WIDE.h / 2;
 const zoomBtn = { x: scopeC.x + D / 2 - 26, y: scopeC.y + D / 2 - 18, r: 24 };
+// 二战样机：小队按钮，放在缩头和扳机中间，上下两个
+const SQ_X = (eyeBtn.x + eyeBtn.r + trigBtn.x - trigBtn.r) / 2;
+const squadBtns = [{ x: SQ_X, y: btnY - 30, r: 24 }, { x: SQ_X, y: btnY + 30, r: 24 }];
 const TRIGGER_FINE = 0.4; // 按着扳机滑动时，手指走 1 点、准星走 0.4 点
 
 const G = {
@@ -73,7 +76,7 @@ const G = {
   title: null, // 开场背景
 };
 
-const FAIL_TEXT = { dead: '他先开枪了', timeout: '时间到了', dry: '子弹打光了', mateDown: '小雨被打中了', escaped: '目标跑了', boom: '炸弹炸了' };
+const FAIL_TEXT = { dead: '他先开枪了', timeout: '时间到了', dry: '子弹打光了', mateDown: '小雨被打中了', escaped: '目标跑了', boom: '炸弹炸了', spotted: '被巡逻发现了' };
 
 function setMode(m) {
   G.mode = m;
@@ -100,7 +103,7 @@ function sfxEvery(name, gap, vol) {
 function levelUnlocked(lv) {
   const S = team.state();
   if (lv.legacy || lv.index === 0) return true;
-  const prev = LV.LEVELS[lv.index - 1];
+  const prev = (lv.city ? LV.CITY_LEVELS : LV.LEVELS)[lv.index - 1];
   if (S.cleared.indexOf(prev.id) < 0) return false;
   if (lv.needStars && team.totalStars() < lv.needStars) return false;
   return true;
@@ -120,6 +123,7 @@ function startRound() {
     round: G.level.rounds[G.roundIdx],
     levelIndex: G.level.index,
     mods: G.mods,
+    alternate: G.level.ww2 ? !!G.alternate : false,
   });
 }
 
@@ -129,8 +133,8 @@ function openLevel(lv) {
     return;
   }
   G.level = lv;
-  if (lv.city) {
-    // 第一座城：不带卡，直接开打（枪的升级在地图页）
+  if (lv.city || lv.ww2) {
+    // 第一座城 / 二战样机：不带卡，直接开打
     G.pickCard = null;
     startLevel();
     return;
@@ -143,8 +147,8 @@ function openLevel(lv) {
 function startLevel() {
   G.arena = null;
   G.daily = null;
-  G.card = G.level.city ? null : G.pickCard;
-  G.mods = G.level.city ? team.gunMods() : team.mods(G.card ? [G.card] : []);
+  G.card = G.level.city || G.level.ww2 ? null : G.pickCard;
+  G.mods = G.level.city ? team.gunMods() : G.level.ww2 ? team.mods([]) : team.mods(G.card ? [G.card] : []);
   G.rescuesLeft = config.rescuesPerLevel + G.mods.rescueAdd;
   G.ammoAdsLeft = config.ammoAdsPerLevel;
   G.seedBase = Math.floor(Math.random() * 100000); // 以后每日挑战改成固定 seed
@@ -253,8 +257,7 @@ function startClassic() {
 }
 
 function goTitle() {
-  const ids = themes.MAP_ORDER;
-  const id = ids[Math.floor(Math.random() * ids.length)];
+  const id = 'ruins'; // 二战样机：开场就是废墟城镇
   G.title = { sc: scene.build(Math.floor(Math.random() * 99999), { poseShift: 3, contrast: 0.2 }, D, id) };
   setMode('title');
 }
@@ -332,6 +335,13 @@ function onTouch(type, id, sx, sy) {
         touches[id] = { role: 'trigger', x, y };
         d.triggerDown();
       } else if (Math.hypot(x - scopeC.x, y - scopeC.y) < D / 2 + 30) touches[id] = { role: 'pan', x, y };
+      return;
+    }
+    const sqHit = (G.duel.squad || []).findIndex((m, i) => squadBtns[i] && inCircle(squadBtns[i], x, y));
+    if (sqHit >= 0) {
+      touches[id] = { role: 'ui' };
+      const m = G.duel.squad[sqHit];
+      if (!G.duel.useSquad(m.id)) toast(m.charges <= 0 ? '这一局用完了' : m.id === 'beret' ? '楼下现在没有巡逻' : '钢盔已经举着了');
       return;
     }
     const cell = panelCell(x, y);
@@ -459,6 +469,7 @@ function nearMiss(reason) {
   const d = G.duel;
   if (!d) return '';
   if (d.near) return d.near(reason);
+  if (reason === 'spotted') return '巡逻就在你楼下：扇形扫过来要缩头，正下方要换窗';
   const head = scene.enemyHead(d.sc, 1);
   if (reason === 'mateDown') {
     const m = d.sc.mate;
@@ -514,6 +525,12 @@ function handleEvents(d) {
       G.say = { text: (ev.head ? '爆头！' : '命中！') + (ev.left > 0 ? ' 还剩 ' + ev.left + ' 个' : ''), color: ev.head ? '#ffd23f' : '#f4f1de', t: 1.2 };
     } else if (ev.kind === 'lampOff') { sfx('wrong', 0.5); G.say = { text: '灯灭了：他们看不见你', color: '#90ee90', t: 1.4 }; }
     else if (ev.kind === 'drawGun') sfx('glint', 0.4);
+    else if (ev.kind === 'squad') {
+      sfx(ev.id === 'beret' ? 'crawl' : 'duck', 0.6);
+      G.say2 = { text: ev.id === 'beret' ? '贝雷帽摸过去了：巡逻停下找人' : '诱饵兵举起钢盔……', t: 1.4 };
+    } else if (ev.kind === 'decoyShot') { sfx('enemyShot'); G.say = { text: '他上钩了！火光在那儿！', color: '#ffd23f', t: 1.6 }; }
+    else if (ev.kind === 'patrolIn') { sfx('tick'); G.say2 = { text: '又来一队巡逻', t: 1.3 }; }
+    else if (ev.kind === 'patrolBack') G.say2 = { text: '巡逻又走起来了', t: 1.2 };
     else if (ev.kind === 'smoke') { sfx('duck', 0.6); G.say2 = { text: '他扔了烟雾弹', t: 1.2 }; }
   }
 }
@@ -568,6 +585,7 @@ function update(dt) {
     else if (d.state === 'timeout') fail('timeout');
     else if (d.state === 'mateDown') fail('mateDown');
     else if (d.state === 'escaped') fail('escaped');
+    else if (d.state === 'spotted') { sfx('lose'); fail('spotted'); }
     else if (d.state === 'boom') { sfx('boom'); G.shake = 0.6; fail('boom'); }
   } else if (m === 'hit') {
     d.update(dt);
@@ -828,6 +846,7 @@ function drawHud() {
   ctx.stroke();
   drawDuckIcon(ctx, eyeBtn.x, eyeBtn.y, d.duck);
   }
+  if (!mission) drawSquad(ctx, d);
   // 右下：扳机。按住屏息，松手开枪
   const st = d.steadiness();
   ctx.beginPath();
@@ -1026,6 +1045,113 @@ function drawPanel(ctx, d) {
     ctx.arc(sx, sy, rr, 0, Math.PI * 2);
     ctx.stroke();
   }
+  drawPatrols(ctx, d, cx, cw);
+}
+
+// 二战样机：楼下街上的巡逻 + 抬头看的扇形视野（近的一段深、远的一段浅）+ 警报条
+function drawPatrols(ctx, d, cx, cw) {
+  if (!d.patrols || !d.patrols.length) return;
+  const p = panelR;
+  const P = config.patrol;
+  const footY = p.y + p.h + 12;
+  d.patrols.forEach((pt) => {
+    if (!pt.active) return;
+    const x = clamp(cx(pt.x), p.x - 8, p.x + p.w + 8);
+    if (pt.stun <= 0 && pt.x > -0.5 && pt.x < d.COLS - 0.5) {
+      const sees = d.patrolSees(pt);
+      ctx.fillStyle = sees ? 'rgba(255,77,94,0.32)' : 'rgba(255,214,90,0.2)';
+      ctx.beginPath();
+      ctx.moveTo(x, footY - 10);
+      ctx.lineTo(x - P.coneCols * cw - cw * 0.5, p.y + 14);
+      ctx.lineTo(x + P.coneCols * cw + cw * 0.5, p.y + 14);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = sees ? 'rgba(255,77,94,0.35)' : 'rgba(255,214,90,0.28)';
+      ctx.fillRect(x - cw * 0.5, p.y + 14, cw, footY - 10 - p.y - 14);
+    }
+    // 巡逻兵：灰绿军装、钢盔；被放倒时躺着冒「zz」
+    ctx.save();
+    ctx.translate(x, footY);
+    if (pt.stun > 0) {
+      ctx.fillStyle = '#5a6a4a';
+      ctx.fillRect(-8, -4, 16, 5);
+      text('zz', 10, -10, 10, '#c9c2e0', 'left', 900);
+    } else {
+      const step = Math.sin(d.t * 8) * (pt.pause > 0 ? 0 : 2);
+      ctx.strokeStyle = '#3a4430';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-1.5, -6);
+      ctx.lineTo(-1.5 + step, 0);
+      ctx.moveTo(1.5, -6);
+      ctx.lineTo(1.5 - step, 0);
+      ctx.stroke();
+      ctx.fillStyle = '#5a6a4a';
+      ctx.fillRect(-4, -14, 8, 8);
+      ctx.beginPath();
+      ctx.arc(0, -16, 4.5, Math.PI, 0);
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+  // 警报条
+  if (d.alarm > 0.01) {
+    roundRect(ctx, p.x + p.w - 96, p.y + 3, 88, 9, 4);
+    ctx.fillStyle = '#1a1428';
+    ctx.fill();
+    roundRect(ctx, p.x + p.w - 96, p.y + 3, 88 * d.alarm, 9, 4);
+    ctx.fillStyle = Math.sin(d.t * 16) > 0 ? '#ff4d5e' : '#c2263a';
+    ctx.fill();
+    text('警报', p.x + p.w - 100, p.y + 8, 10, '#ff4d5e', 'right', 900);
+  }
+}
+
+// 二战样机：小队按钮（诱饵兵、贝雷帽），点一下放技能，右上角是剩几次
+function drawSquad(ctx, d) {
+  (d.squad || []).forEach((m, i) => {
+    const b = squadBtns[i];
+    if (!b) return;
+    const used = m.charges <= 0;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fillStyle = used ? '#2b2438' : '#6b5a3a';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(b.x, b.y - 3);
+    ctx.globalAlpha = used ? 0.35 : 1;
+    if (m.id === 'decoy') {
+      // 杆子挑着钢盔
+      ctx.strokeStyle = '#f4f1de';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -2);
+      ctx.lineTo(0, 12);
+      ctx.stroke();
+      ctx.fillStyle = '#7a8a5a';
+      ctx.beginPath();
+      ctx.arc(0, -2, 8, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(-10, -3, 20, 2.5);
+    } else {
+      // 贝雷帽
+      ctx.fillStyle = '#3a6a3a';
+      ctx.beginPath();
+      ctx.ellipse ? ctx.ellipse(0, 0, 11, 6, -0.2, 0, Math.PI * 2) : ctx.arc(0, 0, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd23f';
+      ctx.fillRect(-4, -2, 3, 3);
+    }
+    ctx.restore();
+    text(config.squad[m.id].name, b.x, b.y + b.r - 6, 8, '#f4f1de', 'center', 900);
+    ctx.beginPath();
+    ctx.arc(b.x + b.r - 4, b.y - b.r + 4, 8, 0, Math.PI * 2);
+    ctx.fillStyle = used ? '#3a3150' : '#ffd23f';
+    ctx.fill();
+    text(String(m.charges), b.x + b.r - 4, b.y - b.r + 5, 10, INK, 'center', 900);
+  });
 }
 
 function drawBullet(ctx, x, y, full) {
@@ -1394,7 +1520,7 @@ function drawTeach() {
   ctx.fillRect(0, 0, L.W, L.H);
   comicText(ctx, '第 ' + lv.no + ' 关 · ' + lv.name, L.W / 2, 70, 28);
   const lines = [];
-  if (lv.index === 0 && lv.legacy) {
+  if (lv.index === 0 && (lv.legacy || lv.ww2)) {
     lines.push(['左下按住 = 缩头', '']);
     lines.push(['下面的红圈 = 他在找你', '停在你窗口上就快缩头']);
   }
@@ -1484,8 +1610,8 @@ function drawMap() {
   const S = team.state();
   ctx.fillStyle = '#1a1030';
   ctx.fillRect(0, 0, L.W, L.H);
-  const ch = LV.CITIES[0];
-  comicText(ctx, '第一座城 · ' + ch.name, L.W / 2, 40, 24);
+  const ch = LV.CHAPTERS[0];
+  comicText(ctx, '二战样机 · ' + ch.name, L.W / 2, 40, 24);
   const rk = team.rank();
   text('段位 ' + rk.name + ' · ★ ' + team.totalStars(), 16, 76, 13, '#ffd23f', 'left', 900);
   text('金币 ¥' + S.money, L.W - 16, 76, 13, '#ffd23f', 'right', 900);
@@ -1495,7 +1621,7 @@ function drawMap() {
   const top = 108;
   const cellW = (L.W - 24) / cols;
   const cellH = Math.min(84, (L.H - top - 96) / Math.ceil(lvs.length / cols));
-  const TYPE_COLOR = { 教学: '#38b000', 主线: '#3a86ff', 特别任务: '#e3263b' };
+  const TYPE_COLOR = { 教学: '#38b000', 主线: '#3a86ff', 特别任务: '#e3263b', 样机: '#c9a227' };
   let lastType = '';
   lvs.forEach((lv, i) => {
     const x = 12 + cellW * (i % cols) + cellW / 2;
@@ -1526,8 +1652,12 @@ function drawMap() {
     text('★★★'.slice(0, stars) + '☆☆☆'.slice(0, 3 - stars), x, y + r + 25, 10, '#ffd23f', 'center', 800);
     G.buttons.push({ id: 'lv_' + lv.id, x: x - r, y: y - r, w: r * 2, h: r * 2, fn: () => openLevel(lv) });
   });
+  // 样机对比用：巡逻和对狙同时压过来，还是轮流来（巡逻在楼下时对面不找你）
+  button('mapAlt', '巡逻和对狙：' + (G.alternate ? '轮流来' : '同时来'), L.W / 2 - 120, L.H - 116, 240, 42, () => {
+    G.alternate = !G.alternate;
+    toast(G.alternate ? '轮流：巡逻在楼下时，对面不找你' : '同时：巡逻和对面一起压过来');
+  });
   button('mapHome', '主页', 12, L.H - 60, 104, 42, goTitle);
-  button('mapGun', '升级枪', L.W / 2 - 52, L.H - 60, 104, 42, () => setMode('gun'), true);
   if (S.revealed) button('mapTeam', '战队', L.W - 116, L.H - 60, 104, 42, () => setMode('team'));
 }
 
@@ -1671,7 +1801,7 @@ function drawResult() {
     button('continue', '继续', L.W / 2 - 100, L.H - 90, 200, 56, () => setMode('reveal'), true);
     return;
   }
-  const next = (lv.legacy ? LV.CAFE : LV.LEVELS)[lv.index + 1];
+  const next = (lv.legacy ? LV.CAFE : lv.city ? LV.CITY_LEVELS : LV.LEVELS)[lv.index + 1];
   if (next && levelUnlocked(next)) button('next', '下一关', L.W / 2 + 10, L.H - 140, 150, 54, () => openLevel(next), true);
   button('again', '再打一次', next && levelUnlocked(next) ? L.W / 2 - 160 : L.W / 2 - 75, L.H - 140, 150, 54, () => openLevel(lv), !(next && levelUnlocked(next)));
   button('resMap', '回地图', L.W / 2 - 60, L.H - 72, 120, 44, goMap);
@@ -1704,16 +1834,16 @@ function drawTitle() {
   ctx.restore();
   scopeRing(ctx, tc.x, tc.y, d);
   cut.logo(ctx, L, t);
-  text('缩头找人 · 屏息开枪 · 谁先暴露谁死', L.W / 2, L.H * 0.14 + 92, 13, '#f4f1de', 'center', 700);
+  text('二战 · 狙击手对决', L.W / 2, L.H * 0.14 + 92, 14, '#f4f1de', 'center', 800);
 
   const S = team.state();
   const by = Math.min(L.H - 230, tc.y + d / 2 + 24);
-  button('start', S.cleared.length ? '继续比赛' : '开始比赛', L.W / 2 - 110, by, 220, 58, goMap, true);
+  button('start', '开始', L.W / 2 - 110, by, 220, 58, goMap, true);
   button('arena', '擂台 · 最好 ' + S.arenaBest, L.W / 2 - 160, by + 70, 150, 44, startArena);
   button('daily', S.daily[dayKey()] ? '每日 · ' + S.daily[dayKey()] + ' 秒' : '每日挑战', L.W / 2 + 10, by + 70, 150, 44, startDaily);
   button('team', S.revealed ? '战队' : '🔒 战队', L.W / 2 - 160, by + 124, 150, 44, () => {
     if (S.revealed) setMode('team');
-    else toast('赢下第一次网吧赛就知道了');
+    else toast('以后开放');
   });
   button('classic', '原作玩法样机', L.W / 2 + 10, by + 124, 150, 44, startClassic);
   if (S.money) text('奖金 ¥' + S.money, L.W / 2, by + 186, 13, '#ffd23f', 'center', 800);
@@ -1937,5 +2067,5 @@ const bgslots = require('./bgslots.js');
 Object.keys(bgslots).forEach((id) => platform.loadImage(bgslots[id].image, (img) => scene.registerArt(id, img, bgslots[id])));
 
 goTitle();
-platform.exposeForTest('__vasily', { startArena, startDaily, retryRound, G, config, scene, team, cut, LV, scopeC, D, eyeBtn, trigBtn, panelR, scale, setMode, openLevel, startLevel, startRound, afterHit, finishLevel, goMap, startClassic, levelUnlocked });
+platform.exposeForTest('__vasily', { squadBtns, startArena, startDaily, retryRound, G, config, scene, team, cut, LV, scopeC, D, eyeBtn, trigBtn, panelR, scale, setMode, openLevel, startLevel, startRound, afterHit, finishLevel, goMap, startClassic, levelUnlocked });
 platform.nextFrame(frame);
